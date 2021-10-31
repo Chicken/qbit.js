@@ -1,0 +1,13 @@
+node_modules/
+dist/
+docs/
+
+package-lock.json
+.node_repl_history
+*.log*
+
+.yarn/
+.vs/
+.vscode/
+.idea/
+.DS_Store

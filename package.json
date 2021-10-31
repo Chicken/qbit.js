@@ -1,0 +1,76 @@
+{
+    "name": "qbit.js",
+    "version": "1.0.0",
+    "description": "a qBittorrent library made with typescript",
+    "keywords": [
+        "qbittorrent",
+        "torrents",
+        "torrenting"
+    ],
+    "author": "Antti <antti@antti.codes>",
+    "license": "MIT",
+    "scripts": {
+        "lint": "yarn eslint src --ext ts --fix",
+        "format": "prettier --write src/**/*.ts",
+        "update": "yarn upgrade-interactive --latest",
+        "build": "tsc -b src && rollup -c scripts/rollup.bundle.ts && gen-esm-wrapper dist/index.js dist/index.mjs",
+        "prebulishOnly": "yarn build",
+        "prepare": "husky install"
+    },
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+        "import": "./dist/index.mjs",
+        "require": "./dist/index.js"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/Chicken/qbit.js.git"
+    },
+    "bugs": {
+        "url": "https://github.com/Chicken/qbit.js/issues"
+    },
+    "homepage": "https://github.com/Chicken/qbit.js#readme",
+    "files": [
+        "dist",
+        "!dist/*.tsbuildinfo"
+    ],
+    "engines": {
+        "node": ">=16",
+        "npm": ">=7"
+    },
+    "eslintConfig": {
+        "extends": "@sapphire"
+    },
+    "eslintIgnore": [
+        "dist"
+    ],
+    "commitlint": {
+        "extends": [
+            "@commitlint/config-conventional"
+        ]
+    },
+    "lint-staged": {
+        "*.ts": "eslint --fix --ext ts"
+    },
+    "dependencies": {
+        "form-data": "^4.0.0",
+        "node-fetch": "2.6.2"
+    },
+    "devDependencies": {
+        "@commitlint/cli": "^13.2.1",
+        "@commitlint/config-conventional": "^13.2.0",
+        "@sapphire/eslint-config": "^4.0.2",
+        "@sapphire/ts-config": "^3.1.3",
+        "@types/node": "^16.11.6",
+        "@types/node-fetch": "2.5.12",
+        "eslint": "^8.1.0",
+        "gen-esm-wrapper": "^1.1.3",
+        "husky": "^7.0.4",
+        "lint-staged": "^11.2.6",
+        "prettier": "^2.4.1",
+        "pretty-quick": "^3.1.1",
+        "rollup": "^2.58.3",
+        "typescript": "^4.4.4"
+    }
+}
