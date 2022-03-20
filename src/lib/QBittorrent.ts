@@ -1,65 +1,33 @@
-import EventEmitter from "events";
-import http from "http";
-import https from "https";
-import fetch, { RequestInit } from "node-fetch";
+import EventEmitter from "node:events";
+import http from "node:http";
+import https from "node:https";
 import { URL } from "node:url";
+import fetch, { RequestInit } from "node-fetch";
+import { Api } from "./Api.js";
 import { Application } from "./Application.js";
-
-export interface ClientOptions {
-    host: string;
-    user: string;
-    password: string;
-    insecure: boolean;
-}
-
-export interface TransferInfo {
-    status: "connected" | "firewalled" | "disconnected";
-    dht: number;
-    download: {
-        session: number;
-        speed: number;
-        limit: number;
-    };
-    upload: {
-        session: number;
-        speed: number;
-        limit: number;
-    };
-}
-
-interface RawTransferInfo {
-    connection_status: "connected" | "firewalled" | "disconnected";
-    dht_nodes: number;
-    dl_info_data: number;
-    dl_info_speed: number;
-    dl_rate_limit: number;
-    up_info_data: number;
-    up_info_speed: number;
-    up_rate_limit: number;
-}
 
 export class QBittorrent extends EventEmitter {
     public application;
+    public api;
+    /** @private */
     public destroyed = false;
-    private user;
-    private password;
+    private user?: string;
+    private password?: string;
     private host;
     private agent;
-    private defer;
+    private defer?: Promise<void>;
     private session = "";
     private exp = 0;
 
-    public constructor(
-        options: ClientOptions = {
-            host: "http://localhost:8080",
-            user: "admin",
-            password: "adminadmin",
-            insecure: false,
-        }
-    ) {
+    /**
+     * Create a new qBittorrent client
+     * @param host qBittorrent host
+     * @param insecure if to allow self signed certs
+     */
+    public constructor(host: string, insecure = false) {
         super();
 
-        const parsedHost = new URL(options.host);
+        const parsedHost = new URL(host);
         if (!["http:", "https:"].includes(parsedHost.protocol))
             throw new Error(`Invalid protocol "${parsedHost.protocol}"!`);
         this.host = parsedHost.href;
@@ -67,11 +35,9 @@ export class QBittorrent extends EventEmitter {
         this.agent =
             parsedHost.protocol === "http:"
                 ? new http.Agent()
-                : new https.Agent({ rejectUnauthorized: !options.insecure });
+                : new https.Agent({ rejectUnauthorized: !insecure });
 
-        this.defer = this.login(options.user, options.password);
-        this.user = options.user;
-        this.password = options.password;
+        this.api = new Api(this);
         this.application = new Application(this);
 
         // TODO: main sync loop and events
@@ -86,12 +52,14 @@ export class QBittorrent extends EventEmitter {
      * Checks if the client is destroyed,
      * not logged in yet or session expired
      * and logs automaticly back in if is.
+     * @private
      */
     public async checkLogin() {
         if (this.destroyed) throw new Error("Client destroyed.");
         await this.defer;
+        if (!this.session || !this.user || !this.password) throw new Error("Not logged in");
         if (Date.now() > this.exp) {
-            this.defer = this.login(this.user, this.password);
+            this.defer = this.sessionLogin(this.user, this.password);
             await this.defer;
         }
     }
@@ -99,11 +67,12 @@ export class QBittorrent extends EventEmitter {
     /**
      * Wrapper for node-fetch
      * Adds session cookies, base path and http agent
+     * @private
      * @param url api url to fetch
      * @param opts fetch options
      */
     public async fetch(url: string, opts?: RequestInit) {
-        const res = await fetch(`${this.host}api/v2${url}`, {
+        const res = await fetch(`${this.host}api/v2/${url}`, {
             ...opts,
             headers: {
                 ...opts?.headers,
@@ -112,7 +81,6 @@ export class QBittorrent extends EventEmitter {
             },
             agent: this.agent,
         });
-        if (!res.ok) throw new Error(`Unexpected status "${res.status}"`);
         return res;
     }
 
@@ -120,52 +88,22 @@ export class QBittorrent extends EventEmitter {
      * Log out and destroy the client
      */
     public async logout() {
-        await this.checkLogin();
         this.destroyed = true;
-        await this.fetch("/auth/logout");
+        await this.api.logout();
     }
 
     /**
-     * Get qBittorrent transfer info
+     * Login to qBittorrent
      */
-    public async getTransferInfo(): Promise<TransferInfo> {
-        await this.checkLogin();
-        const data = (await (await this.fetch("/transfer/info")).json()) as RawTransferInfo;
-        return {
-            status: data.connection_status,
-            dht: data.dht_nodes,
-            download: {
-                session: data.dl_info_data,
-                speed: data.dl_info_speed,
-                limit: data.dl_rate_limit ? data.dl_rate_limit : Infinity,
-            },
-            upload: {
-                session: data.up_info_data,
-                speed: data.up_info_speed,
-                limit: data.up_rate_limit ? data.up_rate_limit : Infinity,
-            },
-        };
+    public async login(username: string, password: string) {
+        this.defer = this.sessionLogin(username, password);
+        this.user = username;
+        this.password = password;
+        await this.defer;
     }
 
-    /**
-     * Refresh the session
-     * @param user qBittorrent username
-     * @param pass qBittorrent password
-     */
-    private async login(user: string, pass: string) {
-        this.session = "";
-        this.exp = 0;
-        const res = await this.fetch("/auth/login", {
-            method: "POST",
-            body: `username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        const session = res.headers.get("set-cookie")?.split(";")?.[0];
-        if (!session) {
-            throw new Error("Invalid credentials");
-        }
+    private async sessionLogin(username: string, password: string) {
+        const session = await this.api.login(username, password);
         this.session = session;
         this.exp = Date.now() + 55 * 60 * 1000;
     }

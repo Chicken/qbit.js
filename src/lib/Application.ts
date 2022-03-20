@@ -1,13 +1,7 @@
+import type { RawBuildInfo } from "./Api";
 import type { QBittorrent } from "./QBittorrent";
 
-export interface BuildInfo {
-    bitness: number;
-    boost: string;
-    libtorrent: string;
-    openssl: string;
-    qt: string;
-    zlib: string;
-}
+export interface BuildInfo extends RawBuildInfo {}
 
 export class Application {
     /**
@@ -19,9 +13,8 @@ export class Application {
      * Shutdown the qBittorrent instance and destroy the client.
      */
     public async shutdown() {
-        await this.qbit.checkLogin();
+        await this.qbit.api.shutdown();
         this.qbit.destroyed = true;
-        await this.qbit.fetch("/app/shutdown");
     }
 
     /**
@@ -29,8 +22,7 @@ export class Application {
      * @returns qBittorrent version
      */
     public async getVersion() {
-        await this.qbit.checkLogin();
-        return (await this.qbit.fetch("/app/version")).text();
+        return this.qbit.api.getApplicationVersion();
     }
 
     /**
@@ -38,8 +30,7 @@ export class Application {
      * @returns qBittorrent api version
      */
     public async getApiVersion() {
-        await this.qbit.checkLogin();
-        return (await this.qbit.fetch("/app/webapiVersion")).text();
+        return this.qbit.api.getApiVersion();
     }
 
     /**
@@ -47,7 +38,6 @@ export class Application {
      * @returns qBittorrent build info
      */
     public async getBuildInfo() {
-        await this.qbit.checkLogin();
-        return (await this.qbit.fetch("/app/buildInfo")).json() as Promise<BuildInfo>;
+        return this.qbit.api.getBuildInfo() as Promise<BuildInfo>;
     }
 }

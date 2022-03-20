@@ -2,7 +2,7 @@
  * Format bytes or bytes per second to human readable format
  * @param bytes Bytes to format
  * @param speed Format as bytes per second, default false
- * @returns Formatted data
+ * @returns formatted string
  */
 export function prettySize(bytes: number, speed = false) {
     const units: [string, number][] = [
