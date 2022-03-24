@@ -1,6 +1,6 @@
 {
     "name": "qbit.js",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "description": "a qBittorrent library made with typescript",
     "keywords": [
         "qbittorrent",
