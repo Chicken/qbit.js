@@ -1,3 +1,5 @@
+import { stat } from "fs/promises";
+import { fileFrom, FormData } from "node-fetch";
 import type { QBittorrent } from "./QBittorrent";
 
 export interface RawBuildInfo {
@@ -663,6 +665,34 @@ export interface RawSearchPlugin {
     version: string;
 }
 
+export interface RawTorrentAddOptions {
+    savepath: string;
+    cookie: string;
+    category: string;
+    tags: string[];
+    skip_checking: boolean;
+    paused: boolean;
+    root_folder: boolean;
+    rename: string;
+    upLimit: number;
+    dlLimit: number;
+    ratioLimit: number;
+    seedingTimeLimit: number;
+    autoTMM: boolean;
+    sequantialDownload: boolean;
+    firstLastPiecePrio: boolean;
+}
+
+function safeURL(str: string) {
+    let url;
+    try {
+        url = new URL(str);
+    } catch (e) {
+        return null;
+    }
+    return url;
+}
+
 export class Api {
     public constructor(private qbit: QBittorrent) {}
 
@@ -964,11 +994,53 @@ export class Api {
         if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
     }
 
-    // TODO: requires more effort to implement
-    public async addTorrent() {
+    public async addTorrent(
+        torrent: Buffer | string | (Buffer | string)[],
+        opts?: Partial<RawTorrentAddOptions>
+    ) {
         await this.qbit.checkLogin();
-
-        throw new Error("Not implemented");
+        const data = new FormData();
+        const torrents = Array.isArray(torrent) ? torrent : [torrent];
+        const links = [];
+        for (const torrent of torrents) {
+            if (Buffer.isBuffer(torrent)) {
+                data.append(
+                    "torrents",
+                    new File([torrent], "upload.torrent", {
+                        type: "application/x-bittorrent",
+                    }),
+                    "upload.torrent"
+                );
+            } else {
+                const parsed = safeURL(torrent);
+                if (parsed && ["http:", "https:", "magnet:"].includes(parsed.protocol)) {
+                    links.push(torrent);
+                } else {
+                    const res = await stat(torrent).catch(() => null);
+                    if (res)
+                        data.append(
+                            "torrents",
+                            await fileFrom(torrent, "application/x-bittorrent")
+                        );
+                    else throw Error(`Invalid torrent string "${torrent}"`);
+                }
+            }
+        }
+        if (links.length > 0) data.set("urls", links.join("\n"));
+        if (opts) {
+            for (const [key, val] of Object.entries(opts)) {
+                if (key === "tags") data.set(key, (val as string[]).join(","));
+                else data.set(key, val.toString());
+            }
+        }
+        // fix for bullshit formdata bugs
+        data.set("fix", "fix");
+        const res = await this.qbit.fetch("torrents/add", {
+            method: "POST",
+            body: data,
+        });
+        if (res.status === 415) throw new Error("Torrent file not valid");
+        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
     }
 
     public async addTorrentTrackers(hash: string, trackers: string[] | string) {
