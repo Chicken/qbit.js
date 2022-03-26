@@ -774,7 +774,7 @@ export class Api {
         return res.text();
     }
 
-    public async getLog(opts: Partial<RawLogOptions>) {
+    public async getLog(opts: Partial<RawLogOptions> = {}) {
         await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
             `log/main?${Object.entries(opts)
