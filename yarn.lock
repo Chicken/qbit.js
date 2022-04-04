@@ -250,13 +250,13 @@
     prettier "^2.6.0"
     typescript "^4.6.2"
 
-"@sapphire/ts-config@3.3.3":
-  version "3.3.3"
-  resolved "https://registry.yarnpkg.com/@sapphire/ts-config/-/ts-config-3.3.3.tgz#c8c74db8fc8f1a0e7175a431ba53b2a746f8b736"
-  integrity sha512-pL0Il7dOMspwOfScGMsdW+Qv3gKYrrEoLUdxHHTiuSqt9J4Oz+B5ezT3+HSorP/t3g8vYdbsB0zlfFvnVcJmSw==
+"@sapphire/ts-config@3.3.4":
+  version "3.3.4"
+  resolved "https://registry.yarnpkg.com/@sapphire/ts-config/-/ts-config-3.3.4.tgz#dabab6a3c1a862ea753b8d4e67a6ac07e9f5d7a7"
+  integrity sha512-mWEUxCXh3cHKI7C8HJ049exVTMNaq+A/lJEDfM5ENSQ/OOZHd5DdmXn2jrYqFWbTRCHa0Vp2FAmACWBwePsBtg==
   dependencies:
     tslib "^2.3.1"
-    typescript "^4.6.2"
+    typescript "^4.6.3"
 
 "@tsconfig/node10@^1.0.7":
   version "1.0.8"
@@ -2203,10 +2203,15 @@ type-fest@^0.8.1:
   resolved "https://registry.yarnpkg.com/type-fest/-/type-fest-0.8.1.tgz#09e249ebde851d3b1e48d27c105444667f17b83d"
   integrity sha512-4dbzIzqvjtgiM5rw1k5rEHtBANKmdudhGyBEajN01fEyhaAIhsoKNy6y7+IN93IfpFtwY9iqi7kD+xwKhQsNJA==
 
-typescript@4.6.2, typescript@^4.4.3, typescript@^4.6.2:
+typescript@4.6.2:
   version "4.6.2"
   resolved "https://registry.yarnpkg.com/typescript/-/typescript-4.6.2.tgz#fe12d2727b708f4eef40f51598b3398baa9611d4"
   integrity sha512-HM/hFigTBHZhLXshn9sN37H085+hQGeJHJ/X7LpBWLID/fbc2acUMfU+lGD98X81sKP+pFa9f0DZmCwB9GnbAg==
+
+typescript@^4.4.3, typescript@^4.6.2, typescript@^4.6.3:
+  version "4.6.3"
+  resolved "https://registry.yarnpkg.com/typescript/-/typescript-4.6.3.tgz#eefeafa6afdd31d725584c67a0eaba80f6fc6c6c"
+  integrity sha512-yNIatDa5iaofVozS/uQJEl3JRWLKKGJKh6Yaiv0GLGSuhpFJe7P3SbHZ8/yjAHRQwKRoA6YZqlfjXWmVzoVSMw==
 
 universalify@^2.0.0:
   version "2.0.0"
