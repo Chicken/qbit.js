@@ -697,7 +697,7 @@ export class Api {
     public constructor(private qbit: QBittorrent) {}
 
     public async login(username: string, password: string) {
-        const res = await this.qbit.fetch("/auth/login", {
+        const res = await this.qbit.fetch("auth/login", {
             method: "POST",
             body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(
                 password
@@ -717,7 +717,7 @@ export class Api {
 
     public async logout() {
         await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("/auth/logout");
+        const res = await this.qbit.fetch("auth/logout");
         if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
     }
 
