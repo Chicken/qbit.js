@@ -70,7 +70,7 @@
         ]
     },
     "dependencies": {
-        "node-fetch": "3.2.3"
+        "node-fetch": "3.2.4"
     },
     "devDependencies": {
         "@commitlint/cli": "16.2.3",
