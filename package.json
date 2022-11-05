@@ -73,7 +73,7 @@
         "node-fetch": "^3.2.4"
     },
     "devDependencies": {
-        "@commitlint/cli": "^16.2.4",
+        "@commitlint/cli": "^17.2.0",
         "@commitlint/config-conventional": "^16.2.4",
         "@sapphire/eslint-config": "^4.3.4",
         "@sapphire/ts-config": "^3.3.4",
