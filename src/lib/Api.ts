@@ -1,5 +1,5 @@
 import { stat } from "fs/promises";
-import { fileFrom, FormData } from "node-fetch";
+import { File, fileFrom, FormData } from "node-fetch";
 import type { QBittorrent } from "./QBittorrent";
 
 export interface RawBuildInfo {
