@@ -355,7 +355,7 @@ export interface RawServerState extends RawTransferInfo {
     alltime_ul: number;
     average_time_queue: number;
     free_space_on_disk: number;
-    global_ration: string;
+    global_ratio: string;
     queued_io_jobs: number;
     queueing: boolean;
     read_cache_hits: string;
