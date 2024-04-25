@@ -1,7 +1,7 @@
-import type { RawBuildInfo } from "./Api";
-import type { QBittorrent } from "./QBittorrent";
+import type { RawBuildInfo } from "./Api.js";
+import type { QBittorrent } from "./QBittorrent.js";
 
-export interface BuildInfo extends RawBuildInfo {}
+export type BuildInfo = RawBuildInfo;
 
 export class Application {
     /**

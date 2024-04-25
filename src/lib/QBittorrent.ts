@@ -1,6 +1,6 @@
-import EventEmitter from "node:events";
-import http from "node:http";
-import https from "node:https";
+import { EventEmitter } from "node:events";
+import * as http from "node:http";
+import * as https from "node:https";
 import { URL } from "node:url";
 import fetch, { RequestInit } from "node-fetch";
 import { Api } from "./Api.js";
@@ -96,6 +96,7 @@ export class QBittorrent extends EventEmitter {
      * Login to qBittorrent
      */
     public async login(username: string, password: string) {
+        if (this.destroyed) throw new Error("Client destroyed.");
         this.defer = this.sessionLogin(username, password);
         this.user = username;
         this.password = password;

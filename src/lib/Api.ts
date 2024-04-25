@@ -1,82 +1,93 @@
 import { stat } from "fs/promises";
 import { File, fileFrom, FormData } from "node-fetch";
-import type { QBittorrent } from "./QBittorrent";
+import { QBittorrent } from "./QBittorrent.js";
+import { Values } from "./typeHelpers.js";
 
-export interface RawBuildInfo {
+export type RawBuildInfo = {
     bitness: number;
     boost: string;
     libtorrent: string;
     openssl: string;
     qt: string;
     zlib: string;
-}
+};
 
-export enum RawScanDirTarget {
-    monitoredFolder = 0,
-    defaultSavePath = 1,
-}
+export const RawScanDirTarget = {
+    monitoredFolder: 0,
+    defaultSavePath: 1,
+} as const;
+export type RawScanDirTarget = Values<typeof RawScanDirTarget>;
 
-export enum RawMaxRatioAction {
-    pause = 0,
-    remove = 1,
-}
+export const RawMaxRatioAction = {
+    pause: 0,
+    remove: 1,
+} as const;
+export type RawMaxRatioAction = Values<typeof RawMaxRatioAction>;
 
-export enum RawBittorrentProtocol {
-    both = 0,
-    TCP = 1,
-    uTP = 2,
-}
+export const RawBittorrentProtocol = {
+    both: 0,
+    TCP: 1,
+    uTP: 2,
+} as const;
+export type RawBittorrentProtocol = Values<typeof RawBittorrentProtocol>;
 
-export enum RawSchedulerDays {
-    everyDay = 0,
-    everyWeekday = 1,
-    everyWeekend = 2,
-    everyMonday = 3,
-    everyTuesday = 4,
-    everyWednesday = 5,
-    everyThursday = 6,
-    everyFriday = 7,
-    everySaturday = 8,
-    everySunday = 9,
-}
+export const RawSchedulerDays = {
+    everyDay: 0,
+    everyWeekday: 1,
+    everyWeekend: 2,
+    everyMonday: 3,
+    everyTuesday: 4,
+    everyWednesday: 5,
+    everyThursday: 6,
+    everyFriday: 7,
+    everySaturday: 8,
+    everySunday: 9,
+} as const;
+export type RawSchedulerDays = Values<typeof RawSchedulerDays>;
 
-export enum RawEncryptionOption {
-    prefer = 0,
-    on = 1,
-    off = 2,
-}
+export const RawEncryptionOption = {
+    prefer: 0,
+    on: 1,
+    off: 2,
+} as const;
+export type RawEncryptionOption = Values<typeof RawEncryptionOption>;
 
-export enum RawProxyType {
-    disabled = -1,
-    httpWithouAuthentication = 1,
-    socks5WithoutAuthentication = 2,
-    httpWithAuthentication = 3,
-    socks5WithAuthentication = 4,
-    socks4WithoutAuthentication = 5,
-}
+export const RawProxyType = {
+    disabled: -1,
+    httpWithouAuthentication: 1,
+    socks5WithoutAuthentication: 2,
+    httpWithAuthentication: 3,
+    socks5WithAuthentication: 4,
+    socks4WithoutAuthentication: 5,
+} as const;
+export type RawProxyType = Values<typeof RawProxyType>;
 
-export enum RawDynDnsService {
-    DyDNS = 0,
-    NOIP = 1,
-}
+export const RawDynDnsService = {
+    DyDNS: 0,
+    NOIP: 1,
+} as const;
+export type RawDynDnsService = Values<typeof RawDynDnsService>;
 
-export enum RawUploadChokingAlgorithm {
-    roundRobin = 0,
-    fastestUpload = 1,
-    antiLeech = 2,
-}
+export const RawUploadChokingAlgorithm = {
+    roundRobin: 0,
+    fastestUpload: 1,
+    antiLeech: 2,
+} as const;
+export type RawUploadChokingAlgorithm = Values<typeof RawUploadChokingAlgorithm>;
 
-export enum RawUploadSlotsBehavior {
-    fixedSlots = 0,
-    uploadRateBased = 1,
-}
+export const RawUploadSlotsBehavior = {
+    fixedSlots: 0,
+    uploadRateBased: 1,
+} as const;
+export type RawUploadSlotsBehavior = Values<typeof RawUploadSlotsBehavior>;
 
-export enum RawUtpTcpMixedMode {
-    preferTcp = 0,
-    peerProportional = 1,
-}
+export const RawUtpTcpMixedMode = {
+    preferTcp: 0,
+    peerProportional: 1,
+} as const;
+export type RawUtpTcpMixedMode = Values<typeof RawUtpTcpMixedMode>;
 
-export interface RawPreference {
+export type RawPreference = {
     locale: string;
     create_subfolder_enabled: boolean;
     start_paused_enabled: boolean;
@@ -223,61 +234,63 @@ export interface RawPreference {
     upload_slots_behavior: RawUploadSlotsBehavior;
     upnp_lease_duration: number;
     utp_tcp_mixed_mode: RawUtpTcpMixedMode;
-}
+};
 
-export interface RawLogOptions {
+export type RawLogOptions = {
     normal: boolean;
     info: boolean;
     warning: boolean;
     critical: boolean;
     last_known_id: number;
-}
+};
 
-export enum RawLogEntryType {
-    normal = 1,
-    info = 2,
-    warning = 4,
-    critical = 8,
-}
+export const RawLogEntryType = {
+    normal: 1,
+    info: 2,
+    warning: 4,
+    critical: 8,
+} as const;
+export type RawLogEntryType = Values<typeof RawLogEntryType>;
 
-export interface RawLogEntry {
+export type RawLogEntry = {
     id: number;
     message: string;
     timestamp: number;
     type: RawLogEntryType;
-}
+};
 
-export interface RawPeerLogEntry {
+export type RawPeerLogEntry = {
     id: number;
     ip: string;
     timestamp: number;
     blocked: boolean;
     reason: string;
-}
+};
 
-export enum RawTorrentState {
-    error = "error",
-    missingFiles = "missingFiles",
-    uploading = "uploading",
-    pausedUP = "pausedUP",
-    queuedUP = "queuedUP",
-    stalledUP = "stalledUP",
-    checkingUP = "checkingUP",
-    forcedUP = "forcedUP",
-    allocating = "allocating",
-    downloading = "downloading",
-    metaDL = "metaDL",
-    pausedDL = "pausedDL",
-    queuedDL = "queuedDL",
-    stalledDL = "stalledDL",
-    checkingDL = "checkingDL",
-    forcedDL = "forcedDL",
-    checkingResumeData = "checkingResumeData",
-    moving = "moving",
-    unknown = "unknown",
-}
+export const RawTorrentState = {
+    error: "error",
+    missingFiles: "missingFiles",
+    uploading: "uploading",
+    pausedUP: "pausedUP",
+    queuedUP: "queuedUP",
+    stalledUP: "stalledUP",
+    checkingUP: "checkingUP",
+    forcedUP: "forcedUP",
+    allocating: "allocating",
+    downloading: "downloading",
+    metaDL: "metaDL",
+    pausedDL: "pausedDL",
+    queuedDL: "queuedDL",
+    stalledDL: "stalledDL",
+    checkingDL: "checkingDL",
+    forcedDL: "forcedDL",
+    checkingResumeData: "checkingResumeData",
+    moving: "moving",
+    unknown: "unknown",
+} as const;
+export type RawTorrentState = Values<typeof RawTorrentState>;
 
-export interface RawTorrent {
+export type RawTorrent = {
     added_on: number;
     amount_left: number;
     auto_tmm: boolean;
@@ -326,20 +339,21 @@ export interface RawTorrent {
     uploaded: number;
     uploaded_session: number;
     upspeed: number;
-}
+};
 
-export interface RawCategory {
+export type RawCategory = {
     name: string;
     savePath: string;
-}
+};
 
-export enum RawConnectionStatus {
-    connected = "connected",
-    firewalled = "firewalled",
-    disconnected = "disconnected",
-}
+export const RawConnectionStatus = {
+    connected: "connected",
+    firewalled: "firewalled",
+    disconnected: "disconnected",
+} as const;
+export type RawConnectionStatus = Values<typeof RawConnectionStatus>;
 
-export interface RawTransferInfo {
+export type RawTransferInfo = {
     connection_status: RawConnectionStatus;
     dht_nodes: number;
     dl_info_data: number;
@@ -348,9 +362,9 @@ export interface RawTransferInfo {
     up_info_data: number;
     up_info_speed: number;
     up_rate_limit: number;
-}
+};
 
-export interface RawServerState extends RawTransferInfo {
+export type RawServerState = RawTransferInfo & {
     alltime_dl: number;
     alltime_ul: number;
     average_time_queue: number;
@@ -367,9 +381,9 @@ export interface RawServerState extends RawTransferInfo {
     total_wasted_session: number;
     use_alt_speed_limits: boolean;
     write_cache_overload: string;
-}
+};
 
-export interface RawMainData {
+export type RawMainData = {
     rid: number;
     full_update: boolean;
     torrents?: Record<string, RawTorrent>;
@@ -381,14 +395,15 @@ export interface RawMainData {
     server_state?: RawServerState;
     trackers?: Record<string, string[]>;
     trackers_removed?: string[];
-}
+};
 
-export enum RawConnectionType {
-    uTP = "μTP",
-    BT = "BT",
-}
+export const RawConnectionType = {
+    uTP: "μTP",
+    BT: "BT",
+} as const;
+export type RawConnectionType = Values<typeof RawConnectionType>;
 
-export interface RawPeer {
+export type RawPeer = {
     client: string;
     connection: RawConnectionType;
     country: string;
@@ -404,79 +419,81 @@ export interface RawPeer {
     relevance: number;
     up_speed: number;
     uploaded: number;
-}
+};
 
-export interface RawTorrentPeerData {
+export type RawTorrentPeerData = {
     full_update: boolean;
     peers: Record<string, RawPeer>;
     rid: number;
     show_flags: boolean;
-}
+};
 
-export enum RawTorrentListFilter {
-    all = "all",
-    downloading = "downloading",
-    seeding = "seeding",
-    completed = "completed",
-    paused = "paused",
-    active = "active",
-    inactive = "inactive",
-    resumed = "resumed",
-    stalled = "stalled",
-    stalled_uploading = "stalled_uploading",
-    stalled_downloading = "stalled_downloading",
-    errored = "errored",
-}
+export const RawTorrentListFilter = {
+    all: "all",
+    downloading: "downloading",
+    seeding: "seeding",
+    completed: "completed",
+    paused: "paused",
+    active: "active",
+    inactive: "inactive",
+    resumed: "resumed",
+    stalled: "stalled",
+    stalled_uploading: "stalled_uploading",
+    stalled_downloading: "stalled_downloading",
+    errored: "errored",
+} as const;
+export type RawTorrentListFilter = Values<typeof RawTorrentListFilter>;
 
-export enum RawTorrentSortKey {
-    added_on = "added_on",
-    amount_left = "amount_left",
-    auto_tmm = "auto_tmm",
-    availability = "availability",
-    category = "category",
-    completed = "completed",
-    completion_on = "completion_on",
-    content_path = "content_path",
-    dl_limit = "dl_limit",
-    dlspeed = "dlspeed",
-    downloaded = "downloaded",
-    downloaded_session = "downloaded_session",
-    eta = "eta",
-    f_l_piece_prio = "f_l_piece_prio",
-    force_start = "force_start",
-    hash = "hash",
-    last_activity = "last_activity",
-    magnet_uri = "magnet_uri",
-    max_ratio = "max_ratio",
-    max_seeding_time = "max_seeding_time",
-    name = "name",
-    num_complete = "num_complete",
-    num_incomplete = "num_incomplete",
-    num_leechs = "num_leechs",
-    num_seeds = "num_seeds",
-    priority = "priority",
-    progress = "progress",
-    ratio = "ratio",
-    ratio_limit = "ratio_limit",
-    save_path = "save_path",
-    seeding_time = "seeding_time",
-    seeding_time_limit = "seeding_time_limit",
-    seen_complete = "seen_complete",
-    seq_dl = "seq_dl",
-    size = "size",
-    state = "state",
-    super_seeding = "super_seeding",
-    tags = "tags",
-    time_active = "time_active",
-    total_size = "total_size",
-    tracker = "tracker",
-    up_limit = "up_limit",
-    uploaded = "uploaded",
-    uploaded_session = "uploaded_session",
-    upspeed = "upspeed",
-}
+export const RawTorrentSortKey = {
+    added_on: "added_on",
+    amount_left: "amount_left",
+    auto_tmm: "auto_tmm",
+    availability: "availability",
+    category: "category",
+    completed: "completed",
+    completion_on: "completion_on",
+    content_path: "content_path",
+    dl_limit: "dl_limit",
+    dlspeed: "dlspeed",
+    downloaded: "downloaded",
+    downloaded_session: "downloaded_session",
+    eta: "eta",
+    f_l_piece_prio: "f_l_piece_prio",
+    force_start: "force_start",
+    hash: "hash",
+    last_activity: "last_activity",
+    magnet_uri: "magnet_uri",
+    max_ratio: "max_ratio",
+    max_seeding_time: "max_seeding_time",
+    name: "name",
+    num_complete: "num_complete",
+    num_incomplete: "num_incomplete",
+    num_leechs: "num_leechs",
+    num_seeds: "num_seeds",
+    priority: "priority",
+    progress: "progress",
+    ratio: "ratio",
+    ratio_limit: "ratio_limit",
+    save_path: "save_path",
+    seeding_time: "seeding_time",
+    seeding_time_limit: "seeding_time_limit",
+    seen_complete: "seen_complete",
+    seq_dl: "seq_dl",
+    size: "size",
+    state: "state",
+    super_seeding: "super_seeding",
+    tags: "tags",
+    time_active: "time_active",
+    total_size: "total_size",
+    tracker: "tracker",
+    up_limit: "up_limit",
+    uploaded: "uploaded",
+    uploaded_session: "uploaded_session",
+    upspeed: "upspeed",
+} as const;
+export type RawTorrentSortKey = Values<typeof RawTorrentSortKey>;
 
-export interface TorrentListOptions {
+export type TorrentListOptions = {
     filter: RawTorrentListFilter;
     category: string;
     tag: string;
@@ -485,9 +502,9 @@ export interface TorrentListOptions {
     limit: number;
     offset: number;
     hashes: string;
-}
+};
 
-export interface RawTorrentProperties {
+export type RawTorrentProperties = {
     save_path: string;
     creation_date: number;
     piece_size: number;
@@ -524,17 +541,18 @@ export interface RawTorrentProperties {
     total_size: number;
     up_speed_avg: number;
     up_speed: number;
-}
+};
 
-export enum RawTrackerStatus {
-    disabled = 0,
-    notContacted = 1,
-    working = 2,
-    updating = 3,
-    notWorking = 4,
-}
+export const RawTrackerStatus = {
+    disabled: 0,
+    notContacted: 1,
+    working: 2,
+    updating: 3,
+    notWorking: 4,
+} as const;
+export type RawTrackerStatus = Values<typeof RawTrackerStatus>;
 
-export interface RawTracker {
+export type RawTracker = {
     url: string;
     status: RawTrackerStatus;
     tier: number;
@@ -543,20 +561,21 @@ export interface RawTracker {
     num_leeches: number;
     num_downloaded: number;
     msg: string;
-}
+};
 
-export interface RawWebSeed {
+export type RawWebSeed = {
     url: string;
-}
+};
 
-export enum RawTorrentFilePriority {
-    doNotDownload = 0,
-    normal = 1,
-    high = 6,
-    maximal = 7,
-}
+export const RawTorrentFilePriority = {
+    doNotDownload: 0,
+    normal: 1,
+    high: 6,
+    maximal: 7,
+} as const;
+export type RawTorrentFilePriority = Values<typeof RawTorrentFilePriority>;
 
-export interface RawTorrentFile {
+export type RawTorrentFile = {
     index: number;
     name: string;
     size: number;
@@ -565,26 +584,27 @@ export interface RawTorrentFile {
     is_seed: boolean;
     piece_range: [number, number];
     availability: number;
-}
+};
 
-export enum RawPieceState {
-    notDownloaded = 0,
-    nowDownloading = 1,
-    alreadyDownloaded = 2,
-}
+export const RawPieceState = {
+    notDownloaded: 0,
+    nowDownloading: 1,
+    alreadyDownloaded: 2,
+} as const;
+export type RawPieceState = Values<typeof RawPieceState>;
 
-export interface RawShareLimitsOptions {
+export type RawShareLimitsOptions = {
     hashes: string[] | string | "all";
     ratioLimit?: number;
     seedingTimeLimit?: number;
-}
+};
 
-export interface RawRssFeed {
+export type RawRssFeed = {
     uid: string;
     url: string;
-}
+};
 
-export interface RawRssArticle {
+export type RawRssArticle = {
     date: string;
     description: string;
     id: string;
@@ -592,17 +612,17 @@ export interface RawRssArticle {
     link: string;
     title: string;
     torrentUrl: string;
-}
+};
 
-export interface RawRssFeedWithArticles extends RawRssFeed {
+export type RawRssFeedWithArticles = RawRssFeed & {
     hasError: boolean;
     isLoading: boolean;
     lastBuildDate: string;
     title: string;
     articles: RawRssArticle[];
-}
+};
 
-export interface RawRssRule {
+export type RawRssRule = {
     enabled: boolean;
     mustContain: string;
     mustNotContain: string;
@@ -616,26 +636,27 @@ export interface RawRssRule {
     addPaused: boolean | null;
     assignedCategory: string;
     savePath: string;
-}
+};
 
-export enum RawSearchStatusType {
-    Stopped = "Stopped",
-    Running = "Running",
-}
+export const RawSearchStatusType = {
+    Stopped: "Stopped",
+    Running: "Running",
+} as const;
+export type RawSearchStatusType = Values<typeof RawSearchStatusType>;
 
-export interface RawSearchStatus {
+export type RawSearchStatus = {
     id: number;
     status: RawSearchStatusType;
     total: number;
-}
+};
 
-export interface RawSearchResultOptions {
+export type RawSearchResultOptions = {
     id: number;
     limit?: number;
     offset?: number;
-}
+};
 
-export interface RawSearchResult {
+export type RawSearchResult = {
     descrLink: string;
     fileName: string;
     fileSize: number;
@@ -643,29 +664,29 @@ export interface RawSearchResult {
     nbLeechers: number;
     nbSeeders: number;
     siteUrl: string;
-}
+};
 
-export interface RawSearchResults {
+export type RawSearchResults = {
     results: RawSearchResult[];
     status: RawSearchStatusType;
     total: number;
-}
+};
 
-export interface RawSearchPluginCategory {
+export type RawSearchPluginCategory = {
     id: string;
     name: string;
-}
+};
 
-export interface RawSearchPlugin {
+export type RawSearchPlugin = {
     enabled: boolean;
     fullName: string;
     name: string;
     supportedCategories: RawSearchPluginCategory[];
     url: string;
     version: string;
-}
+};
 
-export interface RawTorrentAddOptions {
+export type RawTorrentAddOptions = {
     savepath: string;
     cookie: string;
     category: string;
@@ -681,7 +702,7 @@ export interface RawTorrentAddOptions {
     autoTMM: boolean;
     sequantialDownload: boolean;
     firstLastPiecePrio: boolean;
-}
+};
 
 function safeURL(str: string) {
     let url;
@@ -695,6 +716,8 @@ function safeURL(str: string) {
 
 export class Api {
     public constructor(private qbit: QBittorrent) {}
+
+    /* Authentication */
 
     public async login(username: string, password: string) {
         const res = await this.qbit.fetch("auth/login", {
@@ -721,6 +744,8 @@ export class Api {
         if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
     }
 
+    /* Application */
+
     public async getApplicationVersion() {
         await this.qbit.checkLogin();
         const res = await this.qbit.fetch("app/version");
@@ -744,7 +769,9 @@ export class Api {
 
     public async shutdown() {
         await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("app/shutdown");
+        const res = await this.qbit.fetch("app/shutdown", {
+            method: "POST",
+        });
         if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
     }
 
@@ -774,6 +801,8 @@ export class Api {
         return res.text();
     }
 
+    /* Log */
+
     public async getLog(opts: Partial<RawLogOptions> = {}) {
         await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
@@ -794,6 +823,8 @@ export class Api {
         return res.json() as Promise<RawPeerLogEntry[]>;
     }
 
+    /* Sync */
+
     public async getMainData(rid?: number) {
         await this.qbit.checkLogin();
         const res = await this.qbit.fetch(`sync/maindata${rid ? `?rid=${rid}` : ""}`);
@@ -811,6 +842,8 @@ export class Api {
         return res.json() as Promise<RawTorrentPeerData>;
     }
 
+    /* Transfer info */
+
     public async getTransferInfo() {
         await this.qbit.checkLogin();
         const res = await this.qbit.fetch("transfer/info");
@@ -827,7 +860,9 @@ export class Api {
 
     public async toggleAlternativeSpeedLimit() {
         await this.qbit.checkLogin();
-        const res = await this.qbit.fetch(`transfer/toggleSpeedLimitsMode`);
+        const res = await this.qbit.fetch("transfer/toggleSpeedLimitsMode", {
+            method: "POST",
+        });
         if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
     }
 
@@ -880,6 +915,8 @@ export class Api {
         });
         if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
     }
+
+    /* Torrent management */
 
     public async getTorrents(opts: Partial<TorrentListOptions> = {}) {
         await this.qbit.checkLogin();
@@ -1466,6 +1503,8 @@ export class Api {
         if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
     }
 
+    /* RSS */
+
     public async addRssFolder(path: string) {
         await this.qbit.checkLogin();
         const res = await this.qbit.fetch("rss/addFolder", {
@@ -1616,6 +1655,8 @@ export class Api {
         if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
         return res.json() as Promise<Record<string, string[]>>;
     }
+
+    /* Search */
 
     public async startSearch(
         query: string,

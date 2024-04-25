@@ -1,9 +1,6 @@
 {
-    "extends": "@sapphire/ts-config/without-decorators",
+    "extends": "@sapphire/ts-config",
     "compilerOptions": {
-        "module": "ES2020",
-        "importHelpers": true,
-        "noEmitHelpers": true,
-        "skipLibCheck": true
+        "useDefineForClassFields": false
     }
 }
