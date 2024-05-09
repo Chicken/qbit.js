@@ -1817,6 +1817,8 @@ export class Api {
 
     public async setTorrentSavePath(hashes: string | string[] | "all", path: string) {
         await this.qbit.checkLogin();
+        // a random get request to ensure the session is still valid, because we can't retry on 403 due to it being a valid response code
+        await this.getApplicationVersion();
         const res = await this.qbit.fetch(
             "torrents/setSavePath",
             {
@@ -1838,6 +1840,8 @@ export class Api {
 
     public async setTorrentDownloadPath(hashes: string | string[] | "all", path: string) {
         await this.qbit.checkLogin();
+        // a random get request to ensure the session is still valid, because we can't retry on 403 due to it being a valid response code
+        await this.getApplicationVersion();
         const res = await this.qbit.fetch(
             "torrents/setDownloadPath",
             {
