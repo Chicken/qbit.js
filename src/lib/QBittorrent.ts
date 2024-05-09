@@ -1,10 +1,12 @@
+import fetch, { RequestInit } from "node-fetch";
 import { EventEmitter } from "node:events";
 import * as http from "node:http";
 import * as https from "node:https";
 import { URL } from "node:url";
-import fetch, { RequestInit } from "node-fetch";
 import { Api } from "./Api.js";
 import { Application } from "./Application.js";
+
+export const SUPPORTED_QBIT_API_VERSION = "2.9.3";
 
 export class QBittorrent extends EventEmitter {
     public application;
@@ -17,7 +19,6 @@ export class QBittorrent extends EventEmitter {
     private agent;
     private defer?: Promise<void>;
     private session = "";
-    private exp = 0;
 
     /**
      * Create a new qBittorrent client
@@ -41,6 +42,7 @@ export class QBittorrent extends EventEmitter {
         this.application = new Application(this);
 
         // TODO: main sync loop and events
+        // TODO: intents for which intervals to do (main, peer block, torrent peers, log)
         // TODO: torrents, rss and settings managers
         // TODO: format responses
         // TODO: maintain a cache with sync loop
@@ -49,19 +51,14 @@ export class QBittorrent extends EventEmitter {
 
     /**
      * Function to run before any action.
-     * Checks if the client is destroyed,
-     * not logged in yet or session expired
-     * and logs automaticly back in if is.
+     * Checks if the client is destroyed
+     * or not logged in yet
      * @private
      */
     public async checkLogin() {
         if (this.destroyed) throw new Error("Client destroyed.");
         await this.defer;
         if (!this.session || !this.user || !this.password) throw new Error("Not logged in");
-        if (Date.now() > this.exp) {
-            this.defer = this.sessionLogin(this.user, this.password);
-            await this.defer;
-        }
     }
 
     /**
@@ -70,18 +67,30 @@ export class QBittorrent extends EventEmitter {
      * @private
      * @param url api url to fetch
      * @param opts fetch options
+     * @param retryOnForbidden if to retry on 403
      */
-    public async fetch(url: string, opts?: RequestInit) {
-        const res = await fetch(`${this.host}api/v2/${url}`, {
-            ...opts,
-            headers: {
-                ...opts?.headers,
-                Cookie: this.session,
-                Referrer: this.host,
-            },
-            agent: this.agent,
-        });
-        return res;
+    public async fetch(url: string, opts?: RequestInit, retryOnForbidden = true) {
+        const tries = 2;
+        for (let i = 1; i <= tries; i++) {
+            const res = await fetch(`${this.host}api/v2/${url}`, {
+                ...opts,
+                headers: {
+                    ...opts?.headers,
+                    Cookie: this.session,
+                    Referrer: this.host,
+                },
+                agent: this.agent,
+            });
+            if (retryOnForbidden && res.status === 403) {
+                if (i === tries) throw new Error("Invalid credentials");
+                if (!this.session || !this.user || !this.password) throw new Error("Not logged in");
+                this.defer = this.sessionLogin(this.user, this.password);
+                await this.defer;
+                continue;
+            }
+            return res;
+        }
+        throw new Error("unreachable code");
     }
 
     /**
@@ -101,11 +110,14 @@ export class QBittorrent extends EventEmitter {
         this.user = username;
         this.password = password;
         await this.defer;
+        const apiVersion = await this.api.getApiVersion();
+        if (apiVersion !== SUPPORTED_QBIT_API_VERSION) {
+            process.emitWarning(`Unsupported API version ${apiVersion}`);
+        }
     }
 
     private async sessionLogin(username: string, password: string) {
         const session = await this.api.login(username, password);
         this.session = session;
-        this.exp = Date.now() + 55 * 60 * 1000;
     }
 }
