@@ -15,26 +15,18 @@ jobs:
 
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
-
-      - name: Restore CI Cache
-        uses: actions/cache@v3
-        id: cache
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-20-${{ hashFiles('**/yarn.lock') }}
+          node-version: 24
 
       - name: Install Dependencies
-        if: ${{ !steps.cache.outputs.cache-hit }}
-        run: yarn --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Run Prettier
-        run: yarn prettier --check src/**/*.ts
+        run: pnpm prettier --check .
 
   linting:
     name: Linting
@@ -42,26 +34,18 @@ jobs:
 
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
-
-      - name: Restore CI Cache
-        uses: actions/cache@v3
-        id: cache
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-20-${{ hashFiles('**/yarn.lock') }}
+          node-version: 24
 
       - name: Install Dependencies
-        if: ${{ !steps.cache.outputs.cache-hit }}
-        run: yarn --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Run ESLint
-        run: yarn eslint src --ext ts
+        run: pnpm eslint src --ext ts
 
   building:
     name: Building
@@ -69,23 +53,15 @@ jobs:
 
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
-
-      - name: Restore CI Cache
-        uses: actions/cache@v3
-        id: cache
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-20-${{ hashFiles('**/yarn.lock') }}
+          node-version: 24
 
       - name: Install Dependencies
-        if: ${{ !steps.cache.outputs.cache-hit }}
-        run: yarn --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build Project
-        run: yarn build
+        run: pnpm build

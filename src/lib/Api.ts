@@ -1,6 +1,7 @@
-import { File, FormData } from "node-fetch";
+import { FormData } from "undici";
 import { QBittorrent } from "./QBittorrent.js";
-import { DeepPartial, Values } from "./typeHelpers.js";
+import { type DeepPartial, type Values } from "./typeHelpers.js";
+import { safeURL } from "./Util.js";
 
 // MARK: Types
 
@@ -11,6 +12,13 @@ export type RawBuildInfo = {
     openssl: string;
     qt: string;
     zlib: string;
+    /** "linux" | "macos" | "windows" | "unknown" */
+    platform: string;
+};
+
+export type RawProcessInfo = {
+    /** UTC seconds since unix epoch */
+    launch_time: number;
 };
 
 export const RawScanDirTarget = {
@@ -117,6 +125,12 @@ export const RawTorrentFileAutoDeleteMode = {
 } as const;
 export type RawTorrentFileAutoDeleteMode = Values<typeof RawTorrentFileAutoDeleteMode>;
 
+export const RawTorrentContentRemoveOption = {
+    delete: "Delete",
+    moveToTrash: "MoveToTrash",
+} as const;
+export type RawTorrentContentRemoveOption = Values<typeof RawTorrentContentRemoveOption>;
+
 export const RawResumeDataStorageType = {
     legacy: "Legacy",
     sqlite: "SQLite",
@@ -143,11 +157,36 @@ export const RawDiskIOWriteMode = {
 } as const;
 export type RawDiskIOWriteMode = Values<typeof RawDiskIOWriteMode>;
 
+export const RawShareLimitAction = {
+    default: "Default",
+    stop: "Stop",
+    remove: "Remove",
+    removeWithContent: "RemoveWithContent",
+    enableSuperSeeding: "EnableSuperSeeding",
+} as const;
+export type RawShareLimitAction = Values<typeof RawShareLimitAction>;
+
+export const RawTorrentCreatorFormat = {
+    v1: "v1",
+    v2: "v2",
+    hybrid: "hybrid",
+} as const;
+export type RawTorrentCreatorFormat = Values<typeof RawTorrentCreatorFormat>;
+
+export const RawTorrentCreatorStatus = {
+    queued: "Queued",
+    running: "Running",
+    finished: "Finished",
+    failed: "Failed",
+} as const;
+export type RawTorrentCreatorStatus = Values<typeof RawTorrentCreatorStatus>;
+
 export type RawPreference = {
-    // behavior
+    // Behavior
     locale: string;
     performance_warning: boolean;
-
+    status_bar_external_ip: boolean;
+    confirm_torrent_deletion: boolean;
     file_log_enabled: boolean;
     file_log_path: string;
     file_log_backup_enabled: boolean;
@@ -156,22 +195,23 @@ export type RawPreference = {
     file_log_delete_old: boolean;
     file_log_age: number;
     file_log_age_type: RawFileLogAgeType;
+    delete_torrent_content_files: boolean;
 
-    // downloads
+    // Downloads
     torrent_content_layout: RawTorrentContentLayout;
     add_to_top_of_queue: boolean;
-    start_paused_enabled: boolean;
+    add_stopped_enabled: boolean;
     torrent_stop_condition: RawTorrentStopCondition;
     merge_trackers: boolean;
     auto_delete_mode: RawTorrentFileAutoDeleteMode;
     preallocate_all: boolean;
     incomplete_files_ext: boolean;
+    use_unwanted_folder: boolean;
 
     auto_tmm_enabled: boolean;
     torrent_changed_tmm_enabled: boolean;
     save_path_changed_tmm_enabled: boolean;
     category_changed_tmm_enabled: boolean;
-    use_subcategories: boolean;
     save_path: string;
     temp_path_enabled: boolean;
     temp_path: string;
@@ -179,13 +219,14 @@ export type RawPreference = {
     export_dir: string;
     export_dir_fin: string;
 
-    /** deprecated */
+    /** @deprecated server still returns this for backwards compat but it is no longer the source of truth */
     scan_dirs: Record<string, string | RawScanDirTarget>;
 
     excluded_file_names_enabled: boolean;
-    /** newline seperated */
+    /** newline separated */
     excluded_file_names: string;
 
+    // Email notification
     mail_notification_enabled: boolean;
     mail_notification_sender: string;
     mail_notification_email: string;
@@ -195,25 +236,29 @@ export type RawPreference = {
     mail_notification_username: string;
     mail_notification_password: string;
 
+    // External programs
     autorun_on_torrent_added_enabled: boolean;
     autorun_on_torrent_added_program: string;
     autorun_enabled: boolean;
     autorun_program: string;
 
-    // connection
+    // Connection
     listen_port: number;
-    /** deprecated */
+    ssl_enabled: boolean;
+    ssl_listen_port: number;
+    /** @deprecated */
     random_port: boolean;
     upnp: boolean;
-    /** -1 disabled, yes typoed */
+    /** -1 disabled */
     max_connec: number;
-    /** -1 disabled, yes typoed */
+    /** -1 disabled */
     max_connec_per_torrent: number;
     /** -1 disabled */
     max_uploads: number;
     /** -1 disabled */
     max_uploads_per_torrent: number;
 
+    // I2P
     i2p_enabled: boolean;
     i2p_address: string;
     i2p_port: number;
@@ -223,6 +268,7 @@ export type RawPreference = {
     i2p_inbound_length: number;
     i2p_outbound_length: number;
 
+    // Proxy
     proxy_type: RawProxyType;
     proxy_ip: string;
     proxy_port: number;
@@ -235,13 +281,14 @@ export type RawPreference = {
     proxy_rss: boolean;
     proxy_misc: boolean;
 
+    // IP filter
     ip_filter_enabled: boolean;
     ip_filter_path: string;
     ip_filter_trackers: boolean;
-    /** newline seperated */
+    /** newline separated */
     banned_IPs: string;
 
-    // speed
+    // Speed
     /** 0 unlimited, B/s */
     dl_limit: number;
     /** 0 unlimited, B/s */
@@ -258,15 +305,12 @@ export type RawPreference = {
     scheduler_enabled: boolean;
     /** hour & min need to be set at once */
     schedule_from_hour: number;
-    /** hour & min need to be set at once */
     schedule_from_min: number;
-    /** hour & min need to be set at once */
     schedule_to_hour: number;
-    /** hour & min need to be set at once */
     schedule_to_min: number;
     scheduler_days: RawSchedulerDays;
 
-    // bittorrent
+    // BitTorrent
     dht: boolean;
     pex: boolean;
     lsd: boolean;
@@ -286,26 +330,27 @@ export type RawPreference = {
     /** seconds */
     slow_torrent_inactive_timer: number;
 
-    /** enabled & value have to be set at once, calculated from value in response */
+    /** enabled & value have to be set at once */
     max_ratio_enabled: boolean;
-    /** enabled & value have to be set at once, -1 disabled */
+    /** -1 disabled */
     max_ratio: number;
-    /** enabled & value have to be set at once, calculated from value in response */
     max_seeding_time_enabled: boolean;
-    /** enabled & value have to be set at once, -1 disabled */
+    /** minutes, -1 disabled */
     max_seeding_time: number;
-    /** enabled & value have to be set at once, calculated from value in response */
     max_inactive_seeding_time_enabled: boolean;
-    /** enabled & value have to be set at once, -1 disabled */
+    /** minutes, -1 disabled */
     max_inactive_seeding_time: number;
     max_ratio_act: RawMaxRatioAction;
 
     add_trackers_enabled: boolean;
-    /** newline seperated */
+    /** newline separated */
     add_trackers: string;
+    add_trackers_from_url_enabled: boolean;
+    add_trackers_url: string;
+    add_trackers_url_list: string[];
 
-    // web ui
-    /** semicolon seperated */
+    // Web UI
+    /** semicolon separated */
     web_ui_domain_list: string;
     web_ui_address: string;
     web_ui_port: number;
@@ -318,13 +363,14 @@ export type RawPreference = {
     web_ui_password?: string;
     bypass_local_auth: boolean;
     bypass_auth_subnet_whitelist_enabled: boolean;
-    /** newline seperated */
+    /** newline separated */
     bypass_auth_subnet_whitelist: string;
     web_ui_max_auth_fail_count: number;
     /** seconds */
     web_ui_ban_duration: number;
     /** seconds */
     web_ui_session_timeout: number;
+    web_ui_api_key: string;
     alternative_webui_enabled: boolean;
     alternative_webui_path: string;
     web_ui_clickjacking_protection_enabled: boolean;
@@ -332,10 +378,10 @@ export type RawPreference = {
     web_ui_secure_cookie_enabled: boolean;
     web_ui_host_header_validation_enabled: boolean;
     web_ui_use_custom_http_headers_enabled: boolean;
-    /** newline seperated */
+    /** newline separated */
     web_ui_custom_http_headers: string;
     web_ui_reverse_proxy_enabled: boolean;
-    /** semicolon seperated */
+    /** semicolon separated */
     web_ui_reverse_proxies_list: string;
 
     dyndns_enabled: boolean;
@@ -344,34 +390,49 @@ export type RawPreference = {
     dyndns_password: string;
     dyndns_domain: string;
 
-    // rss
+    // RSS
     /** minutes */
     rss_refresh_interval: number;
+    /** milliseconds */
+    rss_fetch_delay: number;
     rss_max_articles_per_feed: number;
     rss_processing_enabled: boolean;
     rss_auto_downloading_enabled: boolean;
     rss_download_repack_proper_episodes: boolean;
-    /** newline seperated */
+    /** newline separated */
     rss_smart_episode_filters: string;
 
-    // advanced
+    // Advanced
     resume_data_storage_type: RawResumeDataStorageType;
+    torrent_content_remove_option: RawTorrentContentRemoveOption;
     /** MiB */
     memory_working_set_limit: number;
     /** empty = any */
     current_network_interface: string;
-    /** automaticaly filled, not available to be set */
+    /** automatically filled, not available to be set */
     current_interface_name: string;
     current_interface_address: string;
     /** minutes */
     save_resume_data_interval: number;
+    /** seconds */
+    save_statistics_interval: number;
     /** bytes */
     torrent_file_size_limit: number;
+    confirm_torrent_recheck: boolean;
     recheck_completed_torrents: boolean;
+    app_instance_name: string;
     /** milliseconds */
     refresh_interval: number;
+    resolve_peer_host_names: boolean;
     resolve_peer_countries: boolean;
     reannounce_when_address_changed: boolean;
+    enable_embedded_tracker: boolean;
+    embedded_tracker_port: number;
+    embedded_tracker_port_forwarding: boolean;
+    mark_of_the_web: boolean;
+    ignore_ssl_errors: boolean;
+    python_executable_path: string;
+
     bdecode_depth_limit: number;
     bdecode_token_limit: number;
     async_io_threads: number;
@@ -412,19 +473,19 @@ export type RawPreference = {
     upnp_lease_duration: number;
     peer_tos: number;
     utp_tcp_mixed_mode: RawUtpTcpMixedMode;
+    /** seconds */
+    hostname_cache_ttl: number;
     idn_support_enabled: boolean;
     enable_multi_connections_from_same_ip: boolean;
     validate_https_tracker_certificate: boolean;
     ssrf_mitigation: boolean;
     block_peers_on_privileged_ports: boolean;
-    enable_embedded_tracker: boolean;
-    embedded_tracker_port: number;
-    embedded_tracker_port_forwarding: boolean;
     upload_slots_behavior: RawUploadSlotsBehavior;
     upload_choking_algorithm: RawUploadChokingAlgorithm;
     announce_to_all_trackers: boolean;
     announce_to_all_tiers: boolean;
     announce_ip: string;
+    announce_port: number;
     max_concurrent_http_announces: number;
     stop_tracker_timeout: number;
     /** percentage 0 - 100 */
@@ -434,6 +495,8 @@ export type RawPreference = {
     /** seconds */
     peer_turnover_interval: number;
     request_queue_size: number;
+    /** newline separated */
+    dht_bootstrap_nodes: string;
 };
 
 export type RawLogOptions = {
@@ -471,7 +534,7 @@ export const RawTorrentState = {
     error: "error",
     missingFiles: "missingFiles",
     uploading: "uploading",
-    pausedUP: "pausedUP",
+    stoppedUP: "stoppedUP",
     queuedUP: "queuedUP",
     stalledUP: "stalledUP",
     checkingUP: "checkingUP",
@@ -479,7 +542,7 @@ export const RawTorrentState = {
     downloading: "downloading",
     metaDL: "metaDL",
     forcedMetaDL: "forcedMetaDL",
-    pausedDL: "pausedDL",
+    stoppedDL: "stoppedDL",
     queuedDL: "queuedDL",
     stalledDL: "stalledDL",
     checkingDL: "checkingDL",
@@ -496,15 +559,31 @@ export type RawTorrent = {
     infohash_v1: string;
     infohash_v2: string;
     name: string;
+    has_metadata: boolean;
+    created_by: string;
+    /** seconds since unix epoch */
+    creation_date: number;
+    /** null when metadata isn't available yet */
+    private: boolean | null;
+    /** bytes */
+    total_size: number;
+    pieces_num: number;
+    /** bytes */
+    piece_size: number;
+
     magnet_uri: string;
     /** bytes */
     size: number;
     /** percentage 0-1 */
     progress: number;
+    /** bytes */
+    total_wasted: number;
+    pieces_have: number;
     /** B/s */
     dlspeed: number;
     /** B/s */
     upspeed: number;
+    /** queue position, 0 if not queued */
     priority: number;
     num_seeds: number;
     num_complete: number;
@@ -516,13 +595,14 @@ export type RawTorrent = {
     seq_dl: boolean;
     f_l_piece_prio: boolean;
     category: string;
-    /** comma seperated */
+    /** ", " separated */
     tags: string;
     super_seeding: boolean;
     force_start: boolean;
     save_path: string;
     download_path: string;
     content_path: string;
+    root_path: string;
     /** seconds since unix epoch */
     added_on: number;
     /** seconds since unix epoch */
@@ -546,20 +626,26 @@ export type RawTorrent = {
     amount_left: number;
     /** bytes */
     completed: number;
-    /** calculated from ratio_limit and global limit, -1 no limit */
+    connections_count: number;
+    /** -1 unlimited */
+    connections_limit: number;
+    /** effective limit calculated from ratio_limit and global limit, -1 no limit */
     max_ratio: number;
-    /** calculated from seeding_time_limit and global limit, seconds, -1 no limit */
+    /** effective limit, minutes, -1 no limit */
     max_seeding_time: number;
-    /** calculated from inactive_seeding_time_limit and global limit, seconds, -1 no limit */
+    /** effective limit, minutes, -1 no limit */
     max_inactive_seeding_time: number;
     /** max 9999 */
     ratio: number;
     /** -2 = global limit, -1 = no limit */
     ratio_limit: number;
-    /** seconds, -2 = global limit, -1 = no limit */
+    /** -1 if ratio is MAX_RATIO */
+    popularity: number;
+    /** minutes, -2 = global limit, -1 = no limit */
     seeding_time_limit: number;
-    /** seconds, -2 = global limit, -1 = no limit */
+    /** minutes, -2 = global limit, -1 = no limit */
     inactive_seeding_time_limit: number;
+    share_limit_action: RawShareLimitAction;
     /** seconds since unix epoch */
     seen_complete: number;
     auto_tmm: boolean;
@@ -571,14 +657,20 @@ export type RawTorrent = {
     last_activity: number;
     /** amount of distributed copies */
     availability: number;
-    /** bytes */
-    total_size: number;
+    /** seconds until next reannounce */
+    reannounce: number;
+    comment: string;
+    /** present when getTorrents was called with includeFiles=true */
+    files?: RawTorrentFile[];
+    /** present when getTorrents was called with includeTrackers=true */
+    trackers?: RawTracker[];
 };
 
 export type RawCategory = {
     name: string;
     savePath: string;
-    download_path: string | false | undefined;
+    /** null when no download path configured */
+    download_path: string | null;
 };
 
 export const RawConnectionStatus = {
@@ -603,6 +695,8 @@ export type RawTransferInfo = {
     up_info_speed: number;
     /** B/s, 0 = unlimited */
     up_rate_limit: number;
+    last_external_address_v4?: string;
+    last_external_address_v6?: string;
 };
 
 export type RawServerState = RawTransferInfo & {
@@ -632,7 +726,6 @@ export type RawServerState = RawTransferInfo & {
     /** bytes */
     total_wasted_session: number;
     use_alt_speed_limits: boolean;
-    use_subcategories: boolean;
     /** number as a string, percentage 0 - 100 */
     write_cache_overload: string;
 };
@@ -669,8 +762,12 @@ export const RawConnectionType = {
 export type RawConnectionType = Values<typeof RawConnectionType>;
 
 export type RawPeer = {
-    ip: string;
-    port: number;
+    /** absent when the peer is I2P (`i2p_dest` is provided instead) */
+    ip?: string;
+    /** absent when the peer is I2P */
+    port?: number;
+    /** I2P destination address, only present for I2P peers */
+    i2p_dest?: string;
     client: string;
     peer_id_client: string;
     /** percentage 0 - 1 */
@@ -687,10 +784,12 @@ export type RawPeer = {
     flags: string;
     flags_desc: string;
     relevance: number;
-    /** newline seperated */
+    /** newline separated */
     files?: string;
-    countr_code?: string;
+    country_code?: string;
     country?: string;
+    /** only set when peer host name resolution is enabled */
+    host_name?: string;
 };
 
 export type RawTorrentPeerData =
@@ -713,8 +812,8 @@ export const RawTorrentListFilter = {
     downloading: "downloading",
     seeding: "seeding",
     completed: "completed",
-    resumed: "resumed",
-    paused: "paused",
+    stopped: "stopped",
+    running: "running",
     active: "active",
     inactive: "inactive",
     stalled: "stalled",
@@ -732,9 +831,18 @@ export const RawTorrentSortKey = {
     infohash_v1: "infohash_v1",
     infohash_v2: "infohash_v2",
     name: "name",
+    has_metadata: "has_metadata",
+    created_by: "created_by",
+    creation_date: "creation_date",
+    private: "private",
+    total_size: "total_size",
+    pieces_num: "pieces_num",
+    piece_size: "piece_size",
     magnet_uri: "magnet_uri",
     size: "size",
     progress: "progress",
+    total_wasted: "total_wasted",
+    pieces_have: "pieces_have",
     dlspeed: "dlspeed",
     upspeed: "upspeed",
     priority: "priority",
@@ -753,6 +861,7 @@ export const RawTorrentSortKey = {
     save_path: "save_path",
     download_path: "download_path",
     content_path: "content_path",
+    root_path: "root_path",
     added_on: "added_on",
     completion_on: "completion_on",
     tracker: "tracker",
@@ -765,21 +874,26 @@ export const RawTorrentSortKey = {
     uploaded_session: "uploaded_session",
     amount_left: "amount_left",
     completed: "completed",
+    connections_count: "connections_count",
+    connections_limit: "connections_limit",
     max_ratio: "max_ratio",
     max_seeding_time: "max_seeding_time",
     max_inactive_seeding_time: "max_inactive_seeding_time",
     ratio: "ratio",
     ratio_limit: "ratio_limit",
+    popularity: "popularity",
     seeding_time_limit: "seeding_time_limit",
     inactive_seeding_time_limit: "inactive_seeding_time_limit",
+    share_limit_action: "share_limit_action",
     seen_complete: "seen_complete",
     auto_tmm: "auto_tmm",
     time_active: "time_active",
     seeding_time: "seeding_time",
     last_activity: "last_activity",
     availability: "availability",
-    total_size: "total_size",
-} satisfies { [TKey in keyof RawTorrent]: TKey };
+    reannounce: "reannounce",
+    comment: "comment",
+} satisfies { [TKey in Exclude<keyof RawTorrent, "files" | "trackers">]: TKey };
 export type RawTorrentSortKey = Values<typeof RawTorrentSortKey>;
 
 export type RawTorrentListOptions = {
@@ -791,8 +905,14 @@ export type RawTorrentListOptions = {
     reverse: boolean;
     limit: number;
     offset: number;
-    /** becomes a pipe seperated string */
+    /** becomes a pipe separated string */
     hashes: string[];
+    /** filter by private/public tracker status */
+    private: boolean;
+    /** include per-torrent files array */
+    includeFiles: boolean;
+    /** include per-torrent trackers array */
+    includeTrackers: boolean;
 };
 
 export type RawTorrentProperties = {
@@ -825,9 +945,9 @@ export type RawTorrentProperties = {
     up_speed: number;
     /** B/s */
     up_speed_avg: number;
-    /** B/s, 0 = unlimited */
+    /** B/s, -1 = unlimited */
     dl_limit: number;
-    /** B/s, 0 = unlimited */
+    /** B/s, -1 = unlimited */
     up_limit: number;
     /** bytes */
     total_wasted: number;
@@ -835,7 +955,12 @@ export type RawTorrentProperties = {
     seeds_total: number;
     peers: number;
     peers_total: number;
+    /** -1 if ratio is MAX_RATIO */
     share_ratio: number;
+    /** -1 if MAX_RATIO */
+    popularity: number;
+    /** distributed copies */
+    availability: number;
     /** seconds until next reannounce */
     reannounce: number;
     /** bytes */
@@ -845,7 +970,13 @@ export type RawTorrentProperties = {
     piece_size: number;
     pieces_have: number;
     created_by: string;
+    /** @deprecated use `private` */
     is_private: boolean;
+    /** null when metadata isn't available */
+    private: boolean | null;
+    has_metadata: boolean;
+    /** percentage 0 - 1 */
+    progress: number;
     /** seconds since unix epoch */
     addition_date: number;
     /** -1 invalid */
@@ -866,8 +997,26 @@ export const RawTrackerStatus = {
     working: 2,
     updating: 3,
     notWorking: 4,
+    trackerError: 5,
+    unreachable: 6,
 } as const;
 export type RawTrackerStatus = Values<typeof RawTrackerStatus>;
+
+export type RawTrackerEndpoint = {
+    name: string;
+    updating: boolean;
+    status: RawTrackerStatus;
+    msg: string;
+    bt_version: number;
+    num_peers: number;
+    num_seeds: number;
+    num_leeches: number;
+    num_downloaded: number;
+    /** seconds since unix epoch */
+    next_announce: number;
+    /** seconds since unix epoch */
+    min_announce: number;
+};
 
 export type RawTracker = {
     url: string;
@@ -879,6 +1028,13 @@ export type RawTracker = {
     num_seeds: number;
     num_leeches: number;
     num_downloaded: number;
+    updating: boolean;
+    /** seconds since unix epoch */
+    next_announce: number;
+    /** seconds since unix epoch */
+    min_announce: number;
+    /** per-endpoint details; empty for sticky trackers (DHT, PeX, LSD) */
+    endpoints: RawTrackerEndpoint[];
 };
 
 export type RawWebSeed = {
@@ -921,10 +1077,11 @@ export type RawPieceState = Values<typeof RawPieceState>;
 export type RawShareLimitsOptions = {
     /** -2 = global, -1 = no limit */
     ratioLimit: number;
-    /** -2 = global, -1 = no limit */
+    /** minutes, -2 = global, -1 = no limit */
     seedingTimeLimit: number;
-    /** -2 = global, -1 = no limit */
+    /** minutes, -2 = global, -1 = no limit */
     inactiveSeedingTimeLimit: number;
+    shareLimitAction: RawShareLimitAction;
 };
 
 export type RawRssFeed = {
@@ -948,7 +1105,7 @@ export type RawRssFeedWithArticles = RawRssFeed & {
     articles: RawRssArticle[];
 };
 
-/** a tree like structure with folders,  */
+/** a tree like structure with folders */
 export type RawRssFeeds<TWithData extends boolean> = {
     [path: string]:
         | RawRssFeeds<TWithData>
@@ -973,15 +1130,15 @@ export type RawRssTorrentParams = {
     upload_limit: number;
     /** B/s, -1 = global limit, 0 = unlimited */
     download_limit: number;
-    /** seconds, -2 = global limit, -1 = no limit */
+    /** minutes, -2 = global limit, -1 = no limit */
     seeding_time_limit: number;
-    /** seconds, -2 = global limit, -1 = no limit */
+    /** minutes, -2 = global limit, -1 = no limit */
     inactive_seeding_time_limit: number;
     /** -2 = global limit, -1 = no limit */
     ratio_limit: number;
 
     add_to_top_of_queue?: boolean;
-    /** add paused, null = global, false = never, true = always */
+    /** null = global, false = never, true = always */
     stopped?: boolean;
     stop_condition?: RawTorrentStopCondition;
     content_layout?: RawTorrentContentLayout;
@@ -1002,20 +1159,19 @@ export type RawRssRule = {
     lastMatch: string;
     ignoreDays: number;
     smartFilter: boolean;
-    /** always empty ? */
     previouslyMatchedEpisodes: string[];
 
     torrentParams: RawRssTorrentParams;
 
-    /** deprecated, use torrentParams */
+    /** @deprecated use torrentParams */
     savePath?: string;
-    /** deprecated, use torrentParams */
+    /** @deprecated use torrentParams */
     assignedCategory?: string;
-    /** deprecated, use torrentParams */
+    /** @deprecated use torrentParams */
     addPaused?: boolean | null;
-    /** deprecated, use torrentParams */
+    /** @deprecated use torrentParams */
     torrentContentLayout?: RawTorrentContentLayout | null;
-    /** deprecated, use torrentParams */
+    /** @deprecated use torrentParams */
     createSubfolder?: boolean | null;
 };
 
@@ -1060,7 +1216,7 @@ export type RawSearchPluginCategory = {
 };
 
 export type RawSearchPlugin = {
-    /** basicly id */
+    /** basically id */
     name: string;
     version: string;
     fullName: string;
@@ -1072,15 +1228,17 @@ export type RawSearchPlugin = {
 export type RawTorrentAddOptions = {
     cookie: string;
     skip_checking: boolean;
-    sequantialDownload: boolean;
+    sequentialDownload: boolean;
     firstLastPiecePrio: boolean;
     addToTopOfQueue: boolean;
-    paused: boolean;
+    /** start the torrent in the stopped state */
+    stopped: boolean;
+    forced: boolean;
     savepath: string;
     downloadPath: string;
     useDownloadPath: boolean;
     category: string;
-    /** becomes a comma seperated list */
+    /** becomes a comma separated list */
     tags: string[];
     rename: string;
     /** B/s, -1 unlimited */
@@ -1088,13 +1246,31 @@ export type RawTorrentAddOptions = {
     /** B/s, -1 unlimited */
     dlLimit: number;
     ratioLimit: number;
-    /** seconds */
+    /** minutes */
     seedingTimeLimit: number;
-    /** seconds */
+    /** minutes */
     inactiveSeedingTimeLimit: number;
+    shareLimitAction: RawShareLimitAction;
     autoTMM: boolean;
     stopCondition: RawTorrentStopCondition;
     contentLayout: RawTorrentContentLayout;
+    /** comma-separated list of `RawTorrentFilePriority` values; only valid when adding a single torrent with cached metadata */
+    filePriorities: RawTorrentFilePriority[];
+    /** search plugin name; fetches via plugin when the source url isn't already cached */
+    downloader: string;
+    /** PEM encoded SSL certificate to attach to the torrent */
+    ssl_certificate: string;
+    /** PEM encoded SSL private key */
+    ssl_private_key: string;
+    /** DH parameters */
+    ssl_dh_params: string;
+};
+
+export type RawTorrentAddResult = {
+    success_count: number;
+    pending_count: number;
+    failure_count: number;
+    added_torrent_ids: string[];
 };
 
 export const SpeedLimitsMode = {
@@ -1124,368 +1300,494 @@ export type RawEditCategoryOptions = {
     downloadPath?: string;
 };
 
-function safeURL(str: string) {
-    let url;
-    try {
-        url = new URL(str);
-    } catch (e) {
-        return null;
+export type RawCookie = {
+    name: string;
+    domain: string;
+    path: string;
+    value: string;
+    /** seconds since unix epoch */
+    expirationDate: number;
+};
+
+export type RawDirectoryEntryMetadata = {
+    name: string;
+    /** "dir" | "file" */
+    type: "dir" | "file";
+    /** bytes, only present for files */
+    size?: number;
+    /** seconds since unix epoch */
+    creation_date: number;
+    /** seconds since unix epoch */
+    last_access_date: number;
+    /** seconds since unix epoch */
+    last_modification_date: number;
+};
+
+export type RawDirectoryContentMode = "all" | "dirs" | "files";
+
+export type RawSSLParameters = {
+    /** PEM encoded */
+    ssl_certificate: string;
+    /** PEM encoded */
+    ssl_private_key: string;
+    ssl_dh_params: string;
+};
+
+export type RawTorrentMetadataInfo = {
+    [key: string]: unknown;
+};
+
+export type RawTorrentCreatorTask = {
+    taskID: string;
+    sourcePath: string;
+    pieceSize: number;
+    private: boolean;
+    /** ISO timestamp */
+    timeAdded: string;
+    status: RawTorrentCreatorStatus;
+    /** libtorrent2 builds only */
+    format?: RawTorrentCreatorFormat;
+    /** libtorrent1 builds only */
+    optimizeAlignment?: boolean;
+    /** libtorrent1 builds only */
+    paddedFileSizeLimit?: number;
+    comment?: string;
+    torrentFilePath?: string;
+    source?: string;
+    trackers?: string[];
+    urlSeeds?: string[];
+    timeStarted?: string;
+    timeFinished?: string;
+    /** only set when status is Failed */
+    errorMessage?: string;
+    /** 0 - 1, only set when status is Running */
+    progress?: number;
+};
+
+export type RawTorrentCreatorOptions = {
+    sourcePath: string;
+    torrentFilePath?: string;
+    private?: boolean;
+    pieceSize?: number;
+    comment?: string;
+    source?: string;
+    /** pipe separated list of tracker URLs */
+    trackers?: string[];
+    /** pipe separated list of web seed URLs */
+    urlSeeds?: string[];
+    /** libtorrent2 only */
+    format?: RawTorrentCreatorFormat;
+    /** libtorrent1 only */
+    optimizeAlignment?: boolean;
+    /** libtorrent1 only */
+    paddedFileSizeLimit?: number;
+    /** start seeding when finished; defaults to true when torrentFilePath is empty */
+    startSeeding?: boolean;
+};
+
+// MARK: API
+
+function encodeForm(params: Record<string, string | number | boolean | undefined>): string {
+    return Object.entries(params)
+        .filter(([, val]) => val !== undefined)
+        .map(([key, val]) => `${key}=${encodeURIComponent(String(val))}`)
+        .join("&");
+}
+
+const FORM_HEADERS = { "Content-Type": "application/x-www-form-urlencoded" } as const;
+
+async function postForm(
+    qbit: QBittorrent,
+    endpoint: string,
+    params: Record<string, string | number | boolean | undefined>
+) {
+    return qbit.fetch(endpoint, {
+        method: "POST",
+        body: encodeForm(params),
+        headers: FORM_HEADERS,
+    });
+}
+
+function ensureOk(res: { status: number }) {
+    if (res.status !== 200 && res.status !== 204) {
+        throw new Error(`Unexpected status "${res.status}"`);
     }
-    return url;
+}
+
+function joinOrSingle(v: number | number[], join?: string): string;
+function joinOrSingle(v: string | string[], join?: string): string;
+function joinOrSingle(v: string | number | string[] | number[], join = "|"): string {
+    return Array.isArray(v) ? v.join(join) : String(v);
 }
 
 export class Api {
     public constructor(private qbit: QBittorrent) {}
 
-    // MARK: Authentication
-
-    public async login(username: string, password: string) {
-        const res = await this.qbit.fetch(
-            "auth/login",
-            {
-                method: "POST",
-                body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(
-                    password
-                )}`,
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-            },
-            false
-        );
-        if (res.status === 403) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
-        const session = res.headers.get("set-cookie")?.split(";")?.[0];
-        if (session === null || session === undefined) {
-            throw new Error("Invalid credentials");
-        }
-        return session;
-    }
-
-    public async logout() {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("auth/logout", {
-            method: "POST",
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
-    }
-
     // MARK: Application
 
     public async getApplicationVersion() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("app/version");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return (await res.text()).trim();
     }
 
     public async getApiVersion() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("app/webapiVersion");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return (await res.text()).trim();
     }
 
     public async getBuildInfo() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("app/buildInfo");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawBuildInfo>;
     }
 
+    public async getProcessInfo() {
+        const res = await this.qbit.fetch("app/processInfo");
+        ensureOk(res);
+        return res.json() as Promise<RawProcessInfo>;
+    }
+
     public async shutdown() {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("app/shutdown", {
-            method: "POST",
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await this.qbit.fetch("app/shutdown", { method: "POST" });
+        ensureOk(res);
     }
 
     public async getPreferences() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("app/preferences");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawPreference>;
     }
 
     public async setPreferences(preferences: Partial<RawPreference>) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("app/setPreferences", {
-            method: "POST",
-            body: `json=${encodeURIComponent(JSON.stringify(preferences))}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "app/setPreferences", {
+            json: JSON.stringify(preferences),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     /** unnecessary, getPreferences already returns save_path */
     public async getDefaultSavePath() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("app/defaultSavePath");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.text();
     }
 
+    public async sendTestEmail() {
+        const res = await this.qbit.fetch("app/sendTestEmail", { method: "POST" });
+        ensureOk(res);
+    }
+
+    public async getDirectoryContent(
+        path: string,
+        opts: { mode?: RawDirectoryContentMode; withMetadata?: false }
+    ): Promise<string[]>;
+    public async getDirectoryContent(
+        path: string,
+        opts: { mode?: RawDirectoryContentMode; withMetadata: true }
+    ): Promise<RawDirectoryEntryMetadata[]>;
+    public async getDirectoryContent(path: string): Promise<string[]>;
+    public async getDirectoryContent(
+        path: string,
+        opts: { mode?: RawDirectoryContentMode; withMetadata?: boolean } = {}
+    ) {
+        const res = await postForm(this.qbit, "app/getDirectoryContent", {
+            dirPath: path,
+            mode: opts.mode,
+            withMetadata: opts.withMetadata,
+        });
+        ensureOk(res);
+        return res.json() as Promise<string[] | RawDirectoryEntryMetadata[]>;
+    }
+
+    public async getCookies() {
+        const res = await this.qbit.fetch("app/cookies");
+        ensureOk(res);
+        return res.json() as Promise<RawCookie[]>;
+    }
+
+    public async setCookies(cookies: RawCookie[]) {
+        const res = await postForm(this.qbit, "app/setCookies", {
+            cookies: JSON.stringify(cookies),
+        });
+        ensureOk(res);
+    }
+
+    public async rotateApiKey() {
+        const res = await this.qbit.fetch("app/rotateAPIKey", { method: "POST" });
+        ensureOk(res);
+        return res.json() as Promise<{ apiKey: string }>;
+    }
+
+    public async deleteApiKey() {
+        const res = await this.qbit.fetch("app/deleteAPIKey", { method: "POST" });
+        ensureOk(res);
+    }
+
     public async getNetworkInterfaces() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("app/networkInterfaceList");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json().then((ifs) => (ifs as { value: string }[]).map((iface) => iface.value));
     }
 
     public async getNetworkInterfaceAddresses(iface: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch(`app/networkInterfaceAddressList?iface=${iface}`);
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await this.qbit.fetch(
+            `app/networkInterfaceAddressList?iface=${encodeURIComponent(iface)}`
+        );
+        ensureOk(res);
         return res.json() as Promise<string[]>;
     }
 
     // MARK: Log
 
     public async getLog(opts: Partial<RawLogOptions> = {}) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch(
-            `log/main?${Object.entries(opts)
-                .map(([key, val]) => `${key}=${encodeURIComponent(val)}`)
-                .join("&")}`
-        );
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await this.qbit.fetch(`log/main?${encodeForm(opts)}`);
+        ensureOk(res);
         return res.json() as Promise<RawLogEntry[]>;
     }
 
     public async getPeerLog(last_known_id?: number) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
             `log/peers${last_known_id ? `?last_known_id=${last_known_id}` : ""}`
         );
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawPeerLogEntry[]>;
     }
 
     // MARK: Sync
 
     public async getMainData(rid?: number) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(`sync/maindata${rid ? `?rid=${rid}` : ""}`);
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawMainData>;
     }
 
     public async getTorrentPeers(hash: string, rid?: number) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
             `sync/torrentPeers?hash=${encodeURIComponent(hash)}${rid ? `&rid=${rid}` : ""}`
         );
         if (res.status === 404) throw new Error("Torrent not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawTorrentPeerData>;
     }
 
     // MARK: Transfer info
 
     public async getTransferInfo() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("transfer/info");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawTransferInfo>;
     }
 
     public async getGlobalUploadLimit() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("transfer/uploadLimit");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return parseFloat(await res.text());
     }
 
     public async getGlobalDownloadLimit() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("transfer/downloadLimit");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return parseFloat(await res.text());
     }
 
     public async setGlobalUploadLimit(limit: number) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("transfer/setUploadLimit", {
-            method: "POST",
-            body: `limit=${Math.round(limit)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "transfer/setUploadLimit", {
+            limit: Math.round(limit),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setGlobalDownloadLimit(limit: number) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("transfer/setDownloadLimit", {
-            method: "POST",
-            body: `limit=${Math.round(limit)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "transfer/setDownloadLimit", {
+            limit: Math.round(limit),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async getSpeedLimitsMode() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("transfer/speedLimitsMode");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
-        return res.text() as Promise<RawSpeedLimitsMode>;
+        ensureOk(res);
+        return (await res.text()) as RawSpeedLimitsMode;
     }
 
     public async setSpeedLimitsMode(mode: RawSpeedLimitsMode) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("transfer/setSpeedLimitsMode", {
-            method: "POST",
-            body: `mode=${mode}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await postForm(this.qbit, "transfer/setSpeedLimitsMode", { mode });
+        ensureOk(res);
     }
 
     public async toggleSpeedLimitsMode() {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("transfer/toggleSpeedLimitsMode", {
-            method: "POST",
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await this.qbit.fetch("transfer/toggleSpeedLimitsMode", { method: "POST" });
+        ensureOk(res);
     }
 
     public async banPeers(peers: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("transfer/banPeers", {
-            method: "POST",
-            body: `peers=${encodeURIComponent(Array.isArray(peers) ? peers.join("|") : peers)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "transfer/banPeers", {
+            peers: joinOrSingle(peers),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     // MARK: Torrent management
 
     public async getTorrentCount() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("torrents/count");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         const num = parseInt(await res.text(), 10);
         if (isNaN(num)) throw new Error("Invalid response");
         return num;
     }
 
     public async getTorrents(opts: Partial<RawTorrentListOptions> = {}) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
             `torrents/info?${Object.entries(opts)
+                .filter(([, val]) => val !== undefined)
                 .map(
                     ([key, val]) =>
-                        `${key}=${Array.isArray(val) ? val.map((v) => encodeURIComponent(v)).join("|") : encodeURIComponent(val.toString())}`
+                        `${key}=${
+                            Array.isArray(val)
+                                ? val.map((v) => encodeURIComponent(v)).join("|")
+                                : encodeURIComponent(String(val))
+                        }`
                 )
                 .join("&")}`
         );
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawTorrent[]>;
     }
 
     public async getTorrent(hash: string) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(`torrents/properties?hash=${encodeURIComponent(hash)}`);
         if (res.status === 404) throw new Error("Torrent not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawTorrentProperties>;
     }
 
     public async getTorrentTrackers(hash: string) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(`torrents/trackers?hash=${encodeURIComponent(hash)}`);
         if (res.status === 404) throw new Error("Torrent not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawTracker[]>;
     }
 
     public async getTorrentWebSeeds(hash: string) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(`torrents/webseeds?hash=${encodeURIComponent(hash)}`);
         if (res.status === 404) throw new Error("Torrent not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawWebSeed[]>;
     }
 
+    public async addTorrentWebSeeds(hash: string, urls: string | string[]) {
+        const res = await postForm(this.qbit, "torrents/addWebSeeds", {
+            hash,
+            urls: joinOrSingle(urls),
+        });
+        if (res.status === 404) throw new Error("Torrent not found");
+        if (res.status === 400) throw new Error(await res.text());
+        ensureOk(res);
+    }
+
+    public async editTorrentWebSeed(hash: string, origUrl: string, newUrl: string) {
+        const res = await postForm(this.qbit, "torrents/editWebSeed", {
+            hash,
+            origUrl,
+            newUrl,
+        });
+        if (res.status === 404) throw new Error("Torrent not found");
+        if (res.status === 400) throw new Error(await res.text());
+        if (res.status === 409) throw new Error(await res.text());
+        ensureOk(res);
+    }
+
+    public async removeTorrentWebSeeds(hash: string, urls: string | string[]) {
+        const res = await postForm(this.qbit, "torrents/removeWebSeeds", {
+            hash,
+            urls: joinOrSingle(urls),
+        });
+        if (res.status === 404) throw new Error("Torrent not found");
+        if (res.status === 400) throw new Error(await res.text());
+        ensureOk(res);
+    }
+
     public async getTorrentFiles(hash: string, indexes?: number | number[]) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
             `torrents/files?hash=${encodeURIComponent(hash)}${
-                indexes
-                    ? `&indexes=${encodeURIComponent(Array.isArray(indexes) ? indexes.join("|") : indexes)}`
-                    : ""
+                indexes ? `&indexes=${encodeURIComponent(joinOrSingle(indexes))}` : ""
             }`
         );
         if (res.status === 404) throw new Error("Torrent not found");
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawTorrentFile[]>;
     }
 
     public async getTorrentPieceHashes(hash: string) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(`torrents/pieceHashes?hash=${encodeURIComponent(hash)}`);
         if (res.status === 404) throw new Error("Torrent not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<string[]>;
     }
 
     public async getTorrentPieceStates(hash: string) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(`torrents/pieceStates?hash=${encodeURIComponent(hash)}`);
         if (res.status === 404) throw new Error("Torrent not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawPieceState[]>;
     }
 
+    public async getTorrentPieceAvailability(hash: string) {
+        const res = await this.qbit.fetch(
+            `torrents/pieceAvailability?hash=${encodeURIComponent(hash)}`
+        );
+        if (res.status === 404) throw new Error("Torrent not found");
+        ensureOk(res);
+        return res.json() as Promise<number[]>;
+    }
+
     /**
-     * returns true if something was added
-     * http(s) urls always return true
-     * @param torrents file buffers, links to torrent files or magnet uris
-     * @param opts options for the added torrents
+     * Add torrents from .torrent file contents, URLs, or magnet links.
+     * Returns a structured count of added/pending/failed and the IDs of
+     * accepted torrents.
+     *
+     * Server status codes:
+     * - 200 / 202 -> success (202 indicates one or more pending downloads)
+     * - 409 -> every torrent failed to add
+     * - 415 -> unsupported media (one of the uploaded blobs wasn't a valid torrent)
      */
     public async addTorrent(
         torrent: Buffer | string | (Buffer | string)[],
         opts?: Partial<RawTorrentAddOptions>
-    ): Promise<boolean> {
-        await this.qbit.checkLogin();
+    ): Promise<RawTorrentAddResult> {
         const data = new FormData();
         const torrents = Array.isArray(torrent) ? torrent : [torrent];
         const links = [];
-        for (const torrent of torrents) {
-            if (Buffer.isBuffer(torrent)) {
+        for (let ti = 0; ti < torrents.length; ti++) {
+            const t = torrents[ti]!;
+            if (Buffer.isBuffer(t)) {
                 data.append(
                     "torrents",
-                    new File([torrent], "upload.torrent", {
-                        type: "application/x-bittorrent",
-                    }),
-                    "upload.torrent"
+                    new File([t], `upload-${ti}.torrent`, { type: "application/x-bittorrent" }),
+                    `upload-${ti}.torrent`
                 );
             } else {
-                const parsed = safeURL(torrent);
+                const parsed = safeURL(t);
                 if (parsed && ["http:", "https:", "magnet:"].includes(parsed.protocol)) {
-                    links.push(torrent);
+                    links.push(t);
                 } else {
-                    throw Error(`Invalid torrent string "${torrent}"`);
+                    throw new Error(`Invalid torrent string "${t}"`);
                 }
             }
         }
         if (links.length > 0) data.set("urls", links.join("\n"));
         if (opts) {
             for (const [key, val] of Object.entries(opts)) {
-                if (key === "tags") data.set(key, (val as string[]).join(","));
-                else data.set(key, val.toString());
+                if (val === undefined) continue;
+                if (key === "tags" || key === "filePriorities") {
+                    data.set(key, (val as (string | number)[]).join(","));
+                } else {
+                    data.set(key, String(val));
+                }
             }
         }
         // fix for formdata bugs
@@ -1495,96 +1797,118 @@ export class Api {
             body: data,
         });
         if (res.status === 415) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
-        return (await res.text()) === "Ok.";
+        // 200 and 202 both indicate success; 202 means some downloads are pending.
+        // 409 indicates every torrent failed to add — still return the structured payload.
+        if (res.status !== 200 && res.status !== 202 && res.status !== 409) {
+            throw new Error(`Unexpected status "${res.status}"`);
+        }
+        return res.json() as Promise<RawTorrentAddResult>;
     }
 
-    public async addTorrentTrackers(hash: string, trackers: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/addTrackers", {
+    public async fetchTorrentMetadata(source: string, downloader?: string) {
+        const res = await postForm(this.qbit, "torrents/fetchMetadata", {
+            source: encodeURIComponent(source),
+            downloader,
+        });
+        if (res.status === 400) throw new Error(await res.text());
+        // 202 means metadata fetch is in progress; payload contains the infoHash.
+        if (res.status !== 200 && res.status !== 202) {
+            throw new Error(`Unexpected status "${res.status}"`);
+        }
+        return res.json() as Promise<RawTorrentMetadataInfo>;
+    }
+
+    public async parseTorrentMetadata(files: Buffer | Buffer[]) {
+        const data = new FormData();
+        const arr = Array.isArray(files) ? files : [files];
+        for (let ti = 0; ti < arr.length; ti++) {
+            const buf = arr[ti]!;
+            data.append(
+                "torrents",
+                new File([buf], `upload-${ti}.torrent`, { type: "application/x-bittorrent" }),
+                `upload-${ti}.torrent`
+            );
+        }
+        const res = await this.qbit.fetch("torrents/parseMetadata", {
             method: "POST",
-            body: `hash=${encodeURIComponent(hash)}&urls=${encodeURIComponent(
-                Array.isArray(trackers) ? trackers.join("\n") : trackers
-            )}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+            body: data,
+        });
+        if (res.status === 400) throw new Error(await res.text());
+        ensureOk(res);
+        return res.json() as Promise<RawTorrentMetadataInfo[]>;
+    }
+
+    public async saveTorrentMetadata(source: string) {
+        const res = await postForm(this.qbit, "torrents/saveMetadata", {
+            source: encodeURIComponent(source),
+        });
+        if (res.status === 404) throw new Error("Metadata not found for source");
+        if (res.status === 409) throw new Error(await res.text());
+        ensureOk(res);
+        return res.blob();
+    }
+
+    public async addTorrentTrackers(hash: string | string[] | "all", trackers: string | string[]) {
+        const res = await postForm(this.qbit, "torrents/addTrackers", {
+            hash: joinOrSingle(hash),
+            urls: joinOrSingle(trackers, "\n"),
         });
         if (res.status === 404) throw new Error("Torrent not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
-        return res.text();
+        ensureOk(res);
     }
 
-    public async editTorrentTrackers(hash: string, origUrl: string, newUrl: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/editTracker", {
-            method: "POST",
-            body: `hash=${encodeURIComponent(hash)}&origUrl=${encodeURIComponent(
-                origUrl
-            )}&newUrl=${encodeURIComponent(newUrl)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+    public async editTorrentTracker(
+        hash: string,
+        url: string,
+        opts: { newUrl?: string; tier?: number }
+    ) {
+        if (opts.newUrl === undefined && opts.tier === undefined) {
+            throw new Error("editTorrentTracker requires at least one of newUrl or tier");
+        }
+        const res = await postForm(this.qbit, "torrents/editTracker", {
+            hash,
+            url,
+            newUrl: opts.newUrl,
+            tier: opts.tier,
         });
         if (res.status === 400) throw new Error(await res.text());
         if (res.status === 404) throw new Error("Torrent not found");
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
-    public async removeTorrentTracker(hash: string, trackers: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/removeTrackers", {
-            method: "POST",
-            body: `hash=${encodeURIComponent(hash)}&urls=${encodeURIComponent(
-                Array.isArray(trackers) ? trackers.join("|") : trackers
-            )}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+    public async removeTorrentTracker(
+        hash: string | string[] | "all",
+        trackers: string | string[]
+    ) {
+        const res = await postForm(this.qbit, "torrents/removeTrackers", {
+            hash: joinOrSingle(hash),
+            urls: joinOrSingle(trackers),
         });
         if (res.status === 404) throw new Error("Torrent not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async addTorrentPeers(hashes: string | string[] | "all", peers: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/addPeers", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&peers=${encodeURIComponent(Array.isArray(peers) ? peers.join("|") : peers)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/addPeers", {
+            hashes: joinOrSingle(hashes),
+            peers: joinOrSingle(peers),
         });
         if (res.status === 400) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<Record<string, RawAddedPeerStats>>;
     }
 
-    public async pauseTorrents(hashes: string | string[] | "all") {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/pause", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+    /** Stop the given torrents (replaces the pre-5.0 `torrents/pause` endpoint). */
+    public async stopTorrents(hashes: string | string[] | "all") {
+        const res = await postForm(this.qbit, "torrents/stop", { hashes: joinOrSingle(hashes) });
+        ensureOk(res);
     }
 
-    public async resumeTorrents(hashes: string | string[] | "all") {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/resume", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+    /** Start the given torrents (replaces the pre-5.0 `torrents/resume` endpoint). */
+    public async startTorrents(hashes: string | string[] | "all") {
+        const res = await postForm(this.qbit, "torrents/start", { hashes: joinOrSingle(hashes) });
+        ensureOk(res);
     }
 
     public async setTorrentFilePriority(
@@ -1592,791 +1916,575 @@ export class Api {
         fileIndexes: number | number[],
         priority: RawTorrentFilePriority
     ) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/filePrio", {
-            method: "POST",
-            body: `hash=${encodeURIComponent(hash)}&id=${encodeURIComponent(
-                Array.isArray(fileIndexes) ? fileIndexes.join("|") : fileIndexes
-            )}&priority=${priority}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/filePrio", {
+            hash,
+            id: joinOrSingle(fileIndexes),
+            priority,
         });
         if (res.status === 400) throw new Error(await res.text());
         if (res.status === 404) throw new Error("Torrent not found");
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     /** 0 is unlimited, -1 not found */
     public async getTorrentUploadLimit(hashes: string | string[]) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
-            `torrents/uploadLimit?hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}`
+            `torrents/uploadLimit?hashes=${encodeURIComponent(joinOrSingle(hashes))}`
         );
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<Record<string, number>>;
     }
 
     /** 0 is unlimited, -1 not found */
     public async getTorrentDownloadLimit(hashes: string | string[]) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
-            `torrents/downloadLimit?hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}`
+            `torrents/downloadLimit?hashes=${encodeURIComponent(joinOrSingle(hashes))}`
         );
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<Record<string, number>>;
     }
 
     /** 0 is unlimited */
     public async setTorrentUploadLimit(hashes: string | string[] | "all", limit: number) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch(`torrents/setUploadLimit`, {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&limit=${limit}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/setUploadLimit", {
+            hashes: joinOrSingle(hashes),
+            limit,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     /** 0 is unlimited */
     public async setTorrentDownloadLimit(hashes: string | string[] | "all", limit: number) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch(`torrents/setDownloadLimit`, {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&limit=${limit}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/setDownloadLimit", {
+            hashes: joinOrSingle(hashes),
+            limit,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setTorrentShareLimits(
         hashes: string | string[] | "all",
         opts: RawShareLimitsOptions
     ) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/setShareLimits", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}&${Object.entries(
-                opts
-            )
-                .map(([key, val]) => `${key}=${encodeURIComponent(val)}`)
-                .join("&")}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/setShareLimits", {
+            hashes: joinOrSingle(hashes),
+            ratioLimit: opts.ratioLimit,
+            seedingTimeLimit: opts.seedingTimeLimit,
+            inactiveSeedingTimeLimit: opts.inactiveSeedingTimeLimit,
+            shareLimitAction: opts.shareLimitAction,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async toggleTorrentSequentialDownload(hashes: string | string[] | "all") {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/toggleSequentialDownload", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/toggleSequentialDownload", {
+            hashes: joinOrSingle(hashes),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
-    public async toggleTorrentFirstLastPiecePriority(hashes: string[] | string | "all") {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/toggleFirstLastPiecePrio", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+    public async toggleTorrentFirstLastPiecePriority(hashes: string | string[] | "all") {
+        const res = await postForm(this.qbit, "torrents/toggleFirstLastPiecePrio", {
+            hashes: joinOrSingle(hashes),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setTorrentSuperSeeding(hashes: string | string[] | "all", enabled: boolean) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/setSuperSeeding", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&value=${enabled}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/setSuperSeeding", {
+            hashes: joinOrSingle(hashes),
+            value: enabled,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setTorrentForceStart(hashes: string | string[] | "all", enabled: boolean) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/setForceStart", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&value=${enabled}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/setForceStart", {
+            hashes: joinOrSingle(hashes),
+            value: enabled,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async deleteTorrents(hashes: string | string[] | "all", deleteFiles: boolean) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/delete", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&deleteFiles=${deleteFiles}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/delete", {
+            hashes: joinOrSingle(hashes),
+            deleteFiles,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async increaseTorrentPriority(hashes: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/increasePrio", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/increasePrio", {
+            hashes: joinOrSingle(hashes),
         });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async decreaseTorrentPriority(hashes: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/decreasePrio", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/decreasePrio", {
+            hashes: joinOrSingle(hashes),
         });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setTorrentTopPriority(hashes: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/topPrio", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "torrents/topPrio", { hashes: joinOrSingle(hashes) });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setTorrentBottomPriority(hashes: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/bottomPrio", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/bottomPrio", {
+            hashes: joinOrSingle(hashes),
         });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
+    /** @deprecated kept for completeness; prefer `setTorrentSavePath` / `setTorrentDownloadPath` */
     public async setTorrentLocation(hashes: string | string[] | "all", location: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/setLocation", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&location=${encodeURIComponent(location)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/setLocation", {
+            hashes: joinOrSingle(hashes),
+            location,
         });
         if (res.status === 400) throw new Error(await res.text());
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setTorrentSavePath(hashes: string | string[] | "all", path: string) {
-        await this.qbit.checkLogin();
-        // a random get request to ensure the session is still valid, because we can't retry on 403 due to it being a valid response code
-        await this.getApplicationVersion();
-        const res = await this.qbit.fetch(
-            "torrents/setSavePath",
-            {
-                method: "POST",
-                body: `id=${encodeURIComponent(
-                    Array.isArray(hashes) ? hashes.join("|") : hashes
-                )}&path=${encodeURIComponent(path)}`,
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-            },
-            false
-        );
+        const res = await postForm(this.qbit, "torrents/setSavePath", {
+            id: joinOrSingle(hashes),
+            path,
+        });
         if (res.status === 400) throw new Error(await res.text());
         if (res.status === 403) throw new Error(await res.text());
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setTorrentDownloadPath(hashes: string | string[] | "all", path: string) {
-        await this.qbit.checkLogin();
-        // a random get request to ensure the session is still valid, because we can't retry on 403 due to it being a valid response code
-        await this.getApplicationVersion();
-        const res = await this.qbit.fetch(
-            "torrents/setDownloadPath",
-            {
-                method: "POST",
-                body: `id=${encodeURIComponent(
-                    Array.isArray(hashes) ? hashes.join("|") : hashes
-                )}&path=${encodeURIComponent(path)}`,
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-            },
-            false
-        );
+        const res = await postForm(this.qbit, "torrents/setDownloadPath", {
+            id: joinOrSingle(hashes),
+            path,
+        });
         if (res.status === 403) throw new Error(await res.text());
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async renameTorrent(hash: string, name: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/rename", {
-            method: "POST",
-            body: `hash=${encodeURIComponent(hash)}&name=${encodeURIComponent(name)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "torrents/rename", { hash, name });
         if (res.status === 404) throw new Error("Torrent not found");
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
+    }
+
+    public async setTorrentComment(hashes: string | string[] | "all", comment: string) {
+        const res = await postForm(this.qbit, "torrents/setComment", {
+            hashes: joinOrSingle(hashes),
+            comment,
+        });
+        ensureOk(res);
     }
 
     public async setTorrentAutoManagement(hashes: string | string[] | "all", enabled: boolean) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/setAutoManagement", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&enable=${enabled}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/setAutoManagement", {
+            hashes: joinOrSingle(hashes),
+            enable: enabled,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async recheckTorrents(hashes: string | string[] | "all") {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/recheck", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await postForm(this.qbit, "torrents/recheck", { hashes: joinOrSingle(hashes) });
+        ensureOk(res);
     }
 
-    public async reannounceTorrents(hashes: string | string[] | "all") {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/reannounce", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(Array.isArray(hashes) ? hashes.join("|") : hashes)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+    /** When `trackers` is provided, only those specific trackers are reannounced. */
+    public async reannounceTorrents(
+        hashes: string | string[] | "all",
+        trackers?: string | string[]
+    ) {
+        const res = await postForm(this.qbit, "torrents/reannounce", {
+            hashes: joinOrSingle(hashes),
+            urls: trackers ? joinOrSingle(trackers) : undefined,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     /** empty to uncategorize */
     public async setTorrentCategory(hashes: string | string[] | "all", category: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/setCategory", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&category=${encodeURIComponent(category)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/setCategory", {
+            hashes: joinOrSingle(hashes),
+            category,
         });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async createCategory(opts: RawCreateCategoryOptions) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/createCategory", {
-            method: "POST",
-            body: Object.entries(opts)
-                .map(([key, val]) => `${key}=${encodeURIComponent(val)}`)
-                .join("&"),
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "torrents/createCategory", { ...opts });
         if (res.status === 400) throw new Error(await res.text());
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async editCategory(opts: RawEditCategoryOptions) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/editCategory", {
-            method: "POST",
-            body: Object.entries(opts)
-                .map(([key, val]) => `${key}=${encodeURIComponent(val)}`)
-                .join("&"),
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "torrents/editCategory", { ...opts });
         if (res.status === 400) throw new Error(await res.text());
-        if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        // 5.x: 404 means category doesn't exist; no-op on no changes is no longer an error
+        if (res.status === 404) throw new Error("Category not found");
+        ensureOk(res);
     }
 
     public async removeCategories(names: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/removeCategories", {
-            method: "POST",
-            body: `categories=${encodeURIComponent(
-                Array.isArray(names) ? names.join("\n") : names
-            )}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/removeCategories", {
+            categories: joinOrSingle(names, "\n"),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async getCategories() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("torrents/categories");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<Record<string, RawCategory>>;
     }
 
     public async addTorrentTags(hashes: string | string[] | "all", tags: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/addTags", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&tags=${encodeURIComponent(Array.isArray(tags) ? tags.join(",") : tags)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/addTags", {
+            hashes: joinOrSingle(hashes),
+            tags: joinOrSingle(tags, ","),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
+    }
+
+    /** Replace all tags on the given torrents with this set (vs. add/remove). */
+    public async setTorrentTags(hashes: string | string[] | "all", tags: string | string[]) {
+        const res = await postForm(this.qbit, "torrents/setTags", {
+            hashes: joinOrSingle(hashes),
+            tags: joinOrSingle(tags, ","),
+        });
+        ensureOk(res);
     }
 
     /** empty to remove all */
     public async removeTorrentTags(hashes: string | string[] | "all", tags: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/removeTags", {
-            method: "POST",
-            body: `hashes=${encodeURIComponent(
-                Array.isArray(hashes) ? hashes.join("|") : hashes
-            )}&tags=${encodeURIComponent(Array.isArray(tags) ? tags.join(",") : tags)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/removeTags", {
+            hashes: joinOrSingle(hashes),
+            tags: joinOrSingle(tags, ","),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async createTags(names: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/createTags", {
-            method: "POST",
-            body: `tags=${encodeURIComponent(Array.isArray(names) ? names.join(",") : names)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/createTags", {
+            tags: joinOrSingle(names, ","),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async deleteTags(names: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/deleteTags", {
-            method: "POST",
-            body: `tags=${encodeURIComponent(Array.isArray(names) ? names.join(",") : names)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "torrents/deleteTags", {
+            tags: joinOrSingle(names, ","),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async getTags() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("torrents/tags");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<string[]>;
     }
 
     public async renameTorrentFile(hash: string, oldPath: string, newPath: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/renameFile", {
-            method: "POST",
-            body: `hash=${encodeURIComponent(hash)}&oldPath=${encodeURIComponent(
-                oldPath
-            )}&newPath=${encodeURIComponent(newPath)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "torrents/renameFile", { hash, oldPath, newPath });
         if (res.status === 404) throw new Error("Torrent not found");
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async renameTorrentFolder(hash: string, oldPath: string, newPath: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("torrents/renameFolder", {
-            method: "POST",
-            body: `hash=${encodeURIComponent(hash)}&oldPath=${encodeURIComponent(
-                oldPath
-            )}&newPath=${encodeURIComponent(newPath)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "torrents/renameFolder", { hash, oldPath, newPath });
         if (res.status === 404) throw new Error("Torrent not found");
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async exportTorrent(hash: string) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(`torrents/export?hash=${encodeURIComponent(hash)}`);
         if (res.status === 404) throw new Error("Torrent not found");
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.blob();
+    }
+
+    public async getTorrentSSLParameters(hash: string) {
+        const res = await this.qbit.fetch(`torrents/SSL?hash=${encodeURIComponent(hash)}`);
+        if (res.status === 404) throw new Error("Torrent not found");
+        ensureOk(res);
+        return res.json() as Promise<RawSSLParameters>;
+    }
+
+    public async setTorrentSSLParameters(hash: string, params: RawSSLParameters) {
+        const res = await postForm(this.qbit, "torrents/SSL", {
+            hash,
+            ssl_certificate: params.ssl_certificate,
+            ssl_private_key: params.ssl_private_key,
+            ssl_dh_params: params.ssl_dh_params,
+        });
+        if (res.status === 404) throw new Error("Torrent not found");
+        if (res.status === 400) throw new Error(await res.text());
+        ensureOk(res);
+    }
+
+    // MARK: Torrent Creator
+
+    public async createTorrent(opts: RawTorrentCreatorOptions) {
+        const res = await postForm(this.qbit, "torrentcreator/addTask", {
+            sourcePath: opts.sourcePath,
+            torrentFilePath: opts.torrentFilePath,
+            private: opts.private,
+            pieceSize: opts.pieceSize,
+            comment: opts.comment,
+            source: opts.source,
+            trackers: opts.trackers?.join("|"),
+            urlSeeds: opts.urlSeeds?.join("|"),
+            format: opts.format,
+            optimizeAlignment: opts.optimizeAlignment,
+            paddedFileSizeLimit: opts.paddedFileSizeLimit,
+            startSeeding: opts.startSeeding,
+        });
+        if (res.status === 409) throw new Error(await res.text());
+        ensureOk(res);
+        return res.json() as Promise<{ taskID: string }>;
+    }
+
+    public async getTorrentCreationStatus(taskID?: string) {
+        const res = await postForm(this.qbit, "torrentcreator/status", { taskID });
+        if (res.status === 404) throw new Error("Task not found");
+        ensureOk(res);
+        return res.json() as Promise<RawTorrentCreatorTask[]>;
+    }
+
+    public async getCreatedTorrentFile(taskID: string) {
+        const res = await postForm(this.qbit, "torrentcreator/torrentFile", { taskID });
+        if (res.status === 404) throw new Error("Task not found");
+        if (res.status === 409) throw new Error(await res.text());
+        ensureOk(res);
+        return res.blob();
+    }
+
+    public async deleteTorrentCreationTask(taskID: string) {
+        const res = await postForm(this.qbit, "torrentcreator/deleteTask", { taskID });
+        if (res.status === 404) throw new Error("Task not found");
+        ensureOk(res);
+    }
+
+    // MARK: Client Data
+
+    public async loadClientData<T = Record<string, unknown>>(keys?: string[]) {
+        const res = await postForm(this.qbit, "clientdata/load", {
+            keys: keys ? JSON.stringify(keys) : undefined,
+        });
+        if (res.status === 400) throw new Error(await res.text());
+        ensureOk(res);
+        return res.json() as Promise<T>;
+    }
+
+    public async storeClientData(data: Record<string, unknown>) {
+        const res = await postForm(this.qbit, "clientdata/store", {
+            data: JSON.stringify(data),
+        });
+        if (res.status === 400) throw new Error(await res.text());
+        if (res.status === 409) throw new Error(await res.text());
+        ensureOk(res);
     }
 
     // MARK: RSS
 
-    /** path uses \ seperator, parent folders must exists */
+    /** path uses `\` separator, parent folders must exist */
     public async addRssFolder(path: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/addFolder", {
-            method: "POST",
-            body: `path=${encodeURIComponent(path)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "rss/addFolder", { path });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
-    /** if path is empty, uses the name from the feed, if path is given seperator is \ and must inlude a name */
-    public async addRssFeed(url: string, path = "") {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/addFeed", {
-            method: "POST",
-            body: `url=${encodeURIComponent(url)}&path=${encodeURIComponent(path)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+    /** if path is empty, uses the name from the feed; separator is `\` */
+    public async addRssFeed(url: string, path = "", refreshInterval?: number) {
+        const res = await postForm(this.qbit, "rss/addFeed", {
+            url,
+            path,
+            refreshInterval,
         });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async setRssFeedUrl(path: string, url: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/setFeedURL", {
-            method: "POST",
-            body: `path=${encodeURIComponent(path)}&url=${encodeURIComponent(url)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "rss/setFeedURL", { path, url });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
-    /** remove rss feed or folder and it's contents */
+    /** seconds */
+    public async setRssFeedRefreshInterval(path: string, refreshInterval: number) {
+        const res = await postForm(this.qbit, "rss/setFeedRefreshInterval", {
+            itemPath: path,
+            refreshInterval,
+        });
+        ensureOk(res);
+    }
+
     public async removeRssItem(path: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/removeItem", {
-            method: "POST",
-            body: `path=${encodeURIComponent(path)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "rss/removeItem", { path });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
-    /** move rss feed or folder and it's contents */
     public async moveRssItem(srcPath: string, destPath: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/moveItem", {
-            method: "POST",
-            body: `itemPath=${encodeURIComponent(srcPath)}&destPath=${encodeURIComponent(
-                destPath
-            )}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "rss/moveItem", { itemPath: srcPath, destPath });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
-    /** get the tree of folders and rss feeds */
     public async getRssItems<TWithData extends boolean>(withdata: TWithData) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch(`rss/items?withdata=${withdata.toString()}`);
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await this.qbit.fetch(`rss/items?withData=${withdata.toString()}`);
+        ensureOk(res);
         return res.json() as Promise<RawRssFeeds<TWithData>>;
     }
 
-    /** mark rss feed, folder or article as read, path has to be to a feed when marking article */
     public async markRssItemAsRead(path: string, articleId?: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/markAsRead", {
-            method: "POST",
-            body: `itemPath=${encodeURIComponent(path)}${
-                articleId ? `&articleId=${encodeURIComponent(articleId)}` : ""
-            }`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await postForm(this.qbit, "rss/markAsRead", { itemPath: path, articleId });
+        ensureOk(res);
     }
 
     /** refresh rss feed or folder, empty string = root folder (all) */
     public async refreshRssItem(itemPath: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/refreshItem", {
-            method: "POST",
-            body: `itemPath=${encodeURIComponent(itemPath)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await postForm(this.qbit, "rss/refreshItem", { itemPath });
+        ensureOk(res);
     }
 
-    /** everything is optional but should be given or they will be overriden by default values */
     public async setRssRule(ruleName: string, ruleDef: DeepPartial<RawRssRule>) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/setRule", {
-            method: "POST",
-            body: `ruleName=${encodeURIComponent(ruleName)}&ruleDef=${encodeURIComponent(
-                JSON.stringify(ruleDef)
-            )}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "rss/setRule", {
+            ruleName,
+            ruleDef: JSON.stringify(ruleDef),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async renameRssRule(ruleName: string, newRuleName: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/renameRule", {
-            method: "POST",
-            body: `ruleName=${encodeURIComponent(ruleName)}&newRuleName=${encodeURIComponent(
-                newRuleName
-            )}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await postForm(this.qbit, "rss/renameRule", { ruleName, newRuleName });
+        ensureOk(res);
     }
 
     public async removeRssRule(ruleName: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/removeRule", {
-            method: "POST",
-            body: `ruleName=${encodeURIComponent(ruleName)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await postForm(this.qbit, "rss/removeRule", { ruleName });
+        ensureOk(res);
     }
 
     public async getRssRules() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("rss/rules");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<Record<string, RawRssRule>>;
     }
 
     public async getRssRuleArticles(ruleName: string) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("rss/matchingArticles", {
-            method: "POST",
-            body: `ruleName=${encodeURIComponent(ruleName)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await postForm(this.qbit, "rss/matchingArticles", { ruleName });
+        ensureOk(res);
         return res.json() as Promise<Record<string, string[]>>;
     }
 
     // MARK: Search
 
-    /** returns search id, multi and enabled are identical as plugins */
+    /** returns search id, "multi" and "enabled" are accepted alongside plugin lists */
     public async startSearch(
         query: string,
         category: string | "all",
         plugins: string | string[] | "all" | "enabled" | "multi"
     ) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("search/start", {
-            method: "POST",
-            body: `pattern=${encodeURIComponent(query)}&plugins=${encodeURIComponent(
-                Array.isArray(plugins) ? plugins.join("|") : plugins
-            )}&category=${encodeURIComponent(category)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "search/start", {
+            pattern: query,
+            plugins: joinOrSingle(plugins),
+            category,
         });
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         const { id } = (await res.json()) as { id: number };
         return id;
     }
 
     public async stopSearch(id: number) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("search/stop", {
-            method: "POST",
-            body: `id=${encodeURIComponent(id)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "search/stop", { id });
         if (res.status === 404) throw new Error("Search not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async getSearchStatus(id?: number) {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch(
             `search/status${id ? `?id=${encodeURIComponent(id)}` : ""}`
         );
         if (res.status === 404) throw new Error("Search not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawSearchStatus[]>;
     }
 
     public async getSearchResults(opts: RawSearchResultOptions) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch(
-            `search/results?${Object.entries(opts)
-                .map(([key, val]) => `${key}=${encodeURIComponent(val)}`)
-                .join("&")}`
-        );
+        const res = await this.qbit.fetch(`search/results?${encodeForm(opts)}`);
         if (res.status === 404) throw new Error("Search not found");
         if (res.status === 409) throw new Error(await res.text());
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawSearchResults>;
     }
 
     public async deleteSearch(id: number) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("search/delete", {
-            method: "POST",
-            body: `id=${encodeURIComponent(id)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        });
+        const res = await postForm(this.qbit, "search/delete", { id });
         if (res.status === 404) throw new Error("Search not found");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
+    }
+
+    public async downloadSearchTorrent(torrentUrl: string, pluginName: string) {
+        const res = await postForm(this.qbit, "search/downloadTorrent", {
+            torrentUrl,
+            pluginName,
+        });
+        ensureOk(res);
     }
 
     public async getSearchPlugins() {
-        await this.qbit.checkLogin();
         const res = await this.qbit.fetch("search/plugins");
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
         return res.json() as Promise<RawSearchPlugin[]>;
     }
 
     public async installSearchPlugin(sources: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("search/installPlugin", {
-            method: "POST",
-            body: `sources=${encodeURIComponent(
-                Array.isArray(sources) ? sources.join("|") : sources
-            )}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "search/installPlugin", {
+            sources: joinOrSingle(sources),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async uninstallSearchPlugin(names: string | string[]) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("search/uninstallPlugin", {
-            method: "POST",
-            body: `names=${encodeURIComponent(Array.isArray(names) ? names.join("|") : names)}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "search/uninstallPlugin", {
+            names: joinOrSingle(names),
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async enableSearchPlugin(names: string | string[], enable: boolean) {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("search/enablePlugin", {
-            method: "POST",
-            body: `names=${encodeURIComponent(
-                Array.isArray(names) ? names.join("|") : names
-            )}&enable=${enable}`,
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+        const res = await postForm(this.qbit, "search/enablePlugin", {
+            names: joinOrSingle(names),
+            enable,
         });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        ensureOk(res);
     }
 
     public async updateSearchPlugins() {
-        await this.qbit.checkLogin();
-        const res = await this.qbit.fetch("search/updatePlugins", {
-            method: "POST",
-        });
-        if (res.status !== 200) throw new Error(`Unexpected status "${res.status}"`);
+        const res = await this.qbit.fetch("search/updatePlugins", { method: "POST" });
+        ensureOk(res);
     }
 }

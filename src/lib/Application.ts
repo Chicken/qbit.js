@@ -1,5 +1,5 @@
-import type { RawBuildInfo } from "./Api.js";
-import type { QBittorrent } from "./QBittorrent.js";
+import { type RawBuildInfo } from "./Api.js";
+import { type QBittorrent } from "./QBittorrent.js";
 
 export type BuildInfo = RawBuildInfo;
 
@@ -14,7 +14,7 @@ export class Application {
      */
     public async shutdown() {
         await this.qbit.api.shutdown();
-        this.qbit.destroyed = true;
+        this.qbit.destroy();
     }
 
     /**

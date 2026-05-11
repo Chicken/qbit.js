@@ -1,42 +1,80 @@
-import fetch, { RequestInit } from "node-fetch";
-import { EventEmitter } from "node:events";
-import * as http from "node:http";
-import * as https from "node:https";
+import { AsyncEventEmitter } from "@vladfrangu/async_event_emitter";
 import { URL } from "node:url";
-import { Api } from "./Api.js";
+import { Agent, fetch, type RequestInit } from "undici";
+import { Api, type RawLogEntry, type RawMainData } from "./Api.js";
 import { Application } from "./Application.js";
+import { semVerCompatible, semver } from "./Util.js";
+import { type Values } from "./typeHelpers.js";
 
-export const SUPPORTED_QBIT_API_VERSION = "2.9.3";
+export const SUPPORTED_QBIT_API_VERSION = semver("2.15.1");
 
-export class QBittorrent extends EventEmitter {
+export const Intent = {
+    Main: "main",
+    NormalLog: "normallog",
+    InfoLog: "infolog",
+    WarningLog: "warninglog",
+    CriticalLog: "criticallog",
+} as const;
+export type Intent = Values<typeof Intent>;
+
+export type QBittorrentOptions = {
+    host: string;
+    apiKey: string;
+    intents?: Intent[];
+    /** default 1000 ms */
+    updateInterval?: number;
+    /** default false, accept invalid ssl/tls certificates */
+    insecure?: boolean;
+};
+
+export const QBittorrentEvents = {
+    MainData: "maindata",
+    Log: "log",
+    Error: "error",
+} as const;
+
+type QBittorrentEventDefinition = {
+    [QBittorrentEvents.MainData]: [RawMainData];
+    [QBittorrentEvents.Log]: [RawLogEntry];
+    [QBittorrentEvents.Error]: [Error];
+};
+
+/** Thrown when the server responds with 404 and body "Endpoint does not exist". */
+export class EndpointNotFoundError extends Error {
+    public constructor(endpoint: string) {
+        super(`Endpoint does not exist: ${endpoint}`);
+        this.name = "EndpointNotFoundError";
+    }
+}
+
+export class QBittorrent extends AsyncEventEmitter<QBittorrentEventDefinition> {
     public application;
     public api;
     /** @private */
     public destroyed = false;
-    private user?: string;
-    private password?: string;
+    private apiKey;
     private host;
+    private intents: Intent[];
+    private updateInterval: number;
     private agent;
-    private defer?: Promise<void>;
-    private session = "";
 
-    /**
-     * Create a new qBittorrent client
-     * @param host qBittorrent host
-     * @param insecure if to allow self signed certs
-     */
-    public constructor(host: string, insecure = false) {
+    private lastMainDataId = 0;
+    private lastLogId = 0;
+
+    public constructor(options: QBittorrentOptions) {
         super();
 
-        const parsedHost = new URL(host);
+        const parsedHost = new URL(options.host);
         if (!["http:", "https:"].includes(parsedHost.protocol))
             throw new Error(`Invalid protocol "${parsedHost.protocol}"!`);
         this.host = parsedHost.href;
+        this.apiKey = options.apiKey;
+        this.intents = options.intents ?? [];
+        this.updateInterval = options.updateInterval ?? 1000;
 
-        this.agent =
-            parsedHost.protocol === "http:"
-                ? new http.Agent()
-                : new https.Agent({ rejectUnauthorized: !insecure });
+        this.agent = new Agent({
+            connect: { rejectUnauthorized: !options.insecure },
+        });
 
         this.api = new Api(this);
         this.application = new Application(this);
@@ -49,75 +87,96 @@ export class QBittorrent extends EventEmitter {
         // TODO: abstract objects for things
     }
 
-    /**
-     * Function to run before any action.
-     * Checks if the client is destroyed
-     * or not logged in yet
-     * @private
-     */
-    public async checkLogin() {
+    /** @private */
+    public checkAlive() {
         if (this.destroyed) throw new Error("Client destroyed.");
-        await this.defer;
-        if (!this.session || !this.user || !this.password) throw new Error("Not logged in");
     }
 
     /**
-     * Wrapper for node-fetch
-     * Adds session cookies, base path and http agent
+     * Wrapper for fetch. Adds Bearer auth header, base path and dispatcher.
+     * Throws EndpointNotFoundError when the server responds with the
+     * "Endpoint does not exist" 404 body so callers can distinguish from
+     * resource-not-found 404s.
      * @private
-     * @param url api url to fetch
-     * @param opts fetch options
-     * @param retryOnForbidden if to retry on 403
      */
-    public async fetch(url: string, opts?: RequestInit, retryOnForbidden = true) {
-        const tries = 2;
-        for (let i = 1; i <= tries; i++) {
-            const res = await fetch(`${this.host}api/v2/${url}`, {
-                ...opts,
-                headers: {
-                    ...opts?.headers,
-                    Cookie: this.session,
-                    Referrer: this.host,
-                },
-                agent: this.agent,
-            });
-            if (retryOnForbidden && res.status === 403) {
-                if (i === tries) throw new Error("Invalid credentials");
-                if (!this.session || !this.user || !this.password) throw new Error("Not logged in");
-                this.defer = this.sessionLogin(this.user, this.password);
-                await this.defer;
-                continue;
+    public async fetch(url: string, opts?: RequestInit) {
+        this.checkAlive();
+        const res = await fetch(`${this.host}api/v2/${url}`, {
+            ...opts,
+            headers: {
+                ...opts?.headers,
+                Authorization: `Bearer ${this.apiKey}`,
+                Referrer: this.host,
+            },
+            dispatcher: this.agent,
+        });
+        if (res.status === 404) {
+            const body = await res.clone().text();
+            if (body === "Endpoint does not exist") {
+                throw new EndpointNotFoundError(url);
             }
-            return res;
         }
-        throw new Error("unreachable code");
+        return res;
     }
 
     /**
-     * Log out and destroy the client
+     * Start sync loops if intents were configured, and warn if the server
+     * speaks an older API version than what this library targets.
      */
-    public async logout() {
-        this.destroyed = true;
-        await this.api.logout();
-    }
-
-    /**
-     * Login to qBittorrent
-     */
-    public async login(username: string, password: string) {
-        if (this.destroyed) throw new Error("Client destroyed.");
-        this.defer = this.sessionLogin(username, password);
-        this.user = username;
-        this.password = password;
-        await this.defer;
+    public async start() {
+        this.checkAlive();
         const apiVersion = await this.api.getApiVersion();
-        if (apiVersion !== SUPPORTED_QBIT_API_VERSION) {
+        if (!semVerCompatible(SUPPORTED_QBIT_API_VERSION, semver(apiVersion))) {
             process.emitWarning(`Unsupported API version ${apiVersion}`);
         }
+
+        if (this.intents.includes(Intent.Main)) {
+            setInterval(this.catchSyncError(this.mainSync.bind(this)), this.updateInterval);
+        }
+        if (
+            [Intent.NormalLog, Intent.InfoLog, Intent.WarningLog, Intent.CriticalLog].some((i) =>
+                this.intents.includes(i)
+            )
+        ) {
+            setInterval(this.catchSyncError(this.logSync.bind(this)), this.updateInterval);
+        }
     }
 
-    private async sessionLogin(username: string, password: string) {
-        const session = await this.api.login(username, password);
-        this.session = session;
+    /** Destroy the client. */
+    public destroy() {
+        this.destroyed = true;
+    }
+
+    private catchSyncError(syncFunc: () => Promise<void>) {
+        return async () => {
+            try {
+                await syncFunc();
+            } catch (e) {
+                this.emit(
+                    QBittorrentEvents.Error,
+                    e instanceof Error ? e : new Error(`Unknown error: ${String(e)}`)
+                );
+            }
+        };
+    }
+
+    private async mainSync() {
+        const mainData = await this.api.getMainData(this.lastMainDataId);
+        this.lastMainDataId = mainData.rid;
+        this.emit(QBittorrentEvents.MainData, mainData);
+    }
+
+    private async logSync() {
+        const logs = await this.api.getLog({
+            normal: this.intents.includes(Intent.NormalLog),
+            info: this.intents.includes(Intent.InfoLog),
+            warning: this.intents.includes(Intent.WarningLog),
+            critical: this.intents.includes(Intent.CriticalLog),
+            last_known_id: this.lastLogId,
+        });
+        if (this.lastLogId !== 0) {
+            logs.forEach((log) => this.emit(QBittorrentEvents.Log, log));
+        }
+        this.lastLogId = logs.at(-1)?.id ?? 0;
     }
 }

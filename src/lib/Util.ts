@@ -1,4 +1,4 @@
-import { SnakeToCamelObject, Unique } from "./typeHelpers.js";
+import { type SnakeToCamelObject, type Unique } from "./typeHelpers.js";
 
 /**
  * Format bytes or bytes per second to human readable format
@@ -24,7 +24,7 @@ export function prettySize(bytes: Size | Speed, speed = false) {
         depth += 1;
     }
 
-    return `${value.toFixed(units[depth][1])} ${units[depth][0]}${speed ? "/s" : ""}`;
+    return `${value.toFixed(units[depth]![1])} ${units[depth]![0]}${speed ? "/s" : ""}`;
 }
 
 /** always a number in bytes */
@@ -52,18 +52,46 @@ export const Speed = {
 export function snakeToCamelObject<TObj extends object>(obj: TObj): SnakeToCamelObject<TObj> {
     const newObj = {} as SnakeToCamelObject<TObj>;
     for (const key in obj) {
-        if (obj.hasOwnProperty(key)) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
             const newKey = key.replace(/_(\w)/g, (_m, g) => g.toUpperCase());
             // @ts-expect-error this type stuff is too complex for me
             newObj[newKey as keyof SnakeToCamelObject<TObj>] =
                 typeof obj[key] == "object" && obj[key] !== null && obj[key] !== undefined
-                    ? // @ts-expect-error this type stuff is too complex for me
-                      snakeToCamelObject(obj[key])
+                    ? snakeToCamelObject(obj[key])
                     : obj[key];
         }
     }
     return newObj;
 }
 
-// TODO: parse magnet link
-// TODO: parse torrent file without libraries (implement bencode)
+export function safeURL(str: string) {
+    let url;
+    try {
+        url = new URL(str);
+    } catch (_e) {
+        return null;
+    }
+    return url;
+}
+
+export type SemVer = {
+    major: number;
+    minor: number;
+    patch: number;
+};
+
+export function semver(version: string): SemVer {
+    const parts = version.split(".").map(Number);
+    if (parts.length !== 3 || parts.some((part) => isNaN(part))) {
+        throw new Error(`Invalid version string: ${version}`);
+    }
+    const [major, minor, patch] = parts;
+    return { major: major!, minor: minor!, patch: patch! };
+}
+
+export function semVerCompatible(supported: SemVer, other: SemVer) {
+    if (other.major !== supported.major) return false;
+    if (other.minor < supported.minor) return false;
+    if (other.minor === supported.minor && other.patch < supported.patch) return false;
+    return true;
+}
